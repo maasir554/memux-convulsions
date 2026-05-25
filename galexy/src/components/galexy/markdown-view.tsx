@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import { Check } from "lucide-react";
 import ReactMarkdown, {
   type Components,
   defaultUrlTransform,
@@ -132,15 +133,25 @@ function TaskCheckbox({
   onToggle?: (lineIndex: number) => void;
 }) {
   const line = useContext(TaskLineContext);
+  const disabled = !onToggle || line == null;
   return (
-    <input
-      type="checkbox"
-      checked={checked}
-      disabled={!onToggle || line == null}
-      onChange={() => {
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => {
         if (onToggle && line != null) onToggle(line);
       }}
-      className="mr-1.5 cursor-pointer accent-primary disabled:cursor-default"
-    />
+      className={cn(
+        "mr-2 inline-flex size-[1.05em] shrink-0 translate-y-[0.12em] items-center justify-center rounded-full border transition-colors",
+        checked
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-muted-foreground/50 hover:border-primary",
+        disabled ? "cursor-default" : "cursor-pointer",
+      )}
+    >
+      {checked && <Check className="size-[0.72em]" strokeWidth={3} />}
+    </button>
   );
 }
