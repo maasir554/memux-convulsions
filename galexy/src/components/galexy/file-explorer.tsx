@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { ItemIcon } from "@/components/galexy/item-icon";
 import { buildVaultTree, type Note } from "@/lib/mock-notes";
 
 type FileExplorerProps = {
@@ -105,7 +106,7 @@ function NoteItem({
         active && "bg-sidebar-accent text-foreground",
       )}
     >
-      <FileText className="size-4 shrink-0" />
+      <ItemIcon type={note.type} className="size-4 shrink-0" />
       <span className="truncate">{note.title}</span>
     </button>
   );

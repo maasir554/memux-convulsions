@@ -17,7 +17,14 @@ import { LeftSidebar } from "@/components/galexy/left-sidebar";
 import { EditorPane } from "@/components/galexy/editor-pane";
 import { RightSidebar } from "@/components/galexy/right-sidebar";
 import { StatusBar } from "@/components/galexy/status-bar";
-import { buildLinkGraph, NOTES, type Note } from "@/lib/mock-notes";
+import {
+  buildContainmentEdges,
+  buildItems,
+  buildLinkGraph,
+  NOTES,
+  type GraphEdge,
+  type Note,
+} from "@/lib/mock-notes";
 
 const ANIM_MS = 240;
 
@@ -64,20 +71,23 @@ export function AppShell() {
     else panel.collapse();
   }
 
-  const byId = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes]);
+  // Files + derived folder items = everything addressable (graph nodes, tabs).
+  const allItems = useMemo(() => buildItems(notes), [notes]);
+  const byId = useMemo(() => new Map(allItems.map((n) => [n.id, n])), [allItems]);
   const titleToId = useMemo(
-    () => new Map(notes.map((n) => [n.title.toLowerCase(), n.id])),
-    [notes],
+    () => new Map(allItems.map((n) => [n.title.toLowerCase(), n.id])),
+    [allItems],
   );
-  const linkGraph = useMemo(() => buildLinkGraph(notes), [notes]);
+  const linkGraph = useMemo(() => buildLinkGraph(allItems), [allItems]);
 
-  const edges = useMemo(() => {
-    const list: { source: string; target: string }[] = [];
+  const edges = useMemo<GraphEdge[]>(() => {
+    const list: GraphEdge[] = [];
     for (const [source, targets] of Object.entries(linkGraph.outgoing)) {
-      for (const target of targets) list.push({ source, target });
+      for (const target of targets) list.push({ source, target, kind: "link" });
     }
+    list.push(...buildContainmentEdges(allItems));
     return list;
-  }, [linkGraph]);
+  }, [linkGraph, allItems]);
 
   const backlinkCount = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -94,6 +104,15 @@ export function AppShell() {
     ids.map((id) => byId.get(id)).filter(Boolean) as Note[];
   const backlinks = activeId ? resolve(linkGraph.backlinks[activeId] ?? []) : [];
   const outgoing = activeId ? resolve(linkGraph.outgoing[activeId] ?? []) : [];
+
+  const folderChildren = useMemo(
+    () =>
+      activeNote?.type === "folder"
+        ? resolve(activeNote.childIds ?? [])
+        : ([] as Note[]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeNote, byId],
+  );
 
   function openNote(id: string) {
     setActiveId(id);
@@ -171,6 +190,7 @@ export function AppShell() {
             <LeftSidebar
               view={leftView}
               notes={notes}
+              items={allItems}
               activeId={activeId ?? ""}
               onOpen={openNote}
               query={query}
@@ -193,8 +213,10 @@ export function AppShell() {
               tabs={tabs}
               activeId={activeId}
               activeNote={activeNote}
+              folderChildren={folderChildren}
               onActivate={setActiveId}
               onClose={closeTab}
+              onOpen={openNote}
               onChange={updateContent}
               linkExists={wikiLinkExists}
               onOpenWikiLink={openWikiLink}

@@ -3,23 +3,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 
-import type { Note } from "@/lib/mock-notes";
+import type { GraphEdge, Note } from "@/lib/mock-notes";
 import type {
   GraphColors,
   GraphLink,
   GraphNode,
 } from "@/components/galexy/force-graph-canvas";
 
-// Canvas + d3-force; client-only (touches window/canvas), so never SSR it.
 const ForceGraphCanvas = dynamic(
   () => import("@/components/galexy/force-graph-canvas"),
   { ssr: false },
 );
 
 const FALLBACK: GraphColors = {
-  node: "#7aa2f7",
+  markdown: "#7aa2f7",
+  code: "#5cf08a",
+  csv: "#3bc9db",
+  pdf: "#ff8787",
+  image: "#d0a3ff",
+  folder: "#ffd43b",
   active: "#ff6ac1",
   link: "#3b3f51",
+  contains: "#ffd43b",
   text: "#c8ccd4",
 };
 
@@ -29,23 +34,29 @@ function readColors(): GraphColors {
   const get = (name: string, fallback: string) =>
     style.getPropertyValue(name).trim() || fallback;
   return {
-    node: get("--graph-node", FALLBACK.node),
+    markdown: get("--graph-markdown", FALLBACK.markdown),
+    code: get("--graph-code", FALLBACK.code),
+    csv: get("--graph-csv", FALLBACK.csv),
+    pdf: get("--graph-pdf", FALLBACK.pdf),
+    image: get("--graph-image", FALLBACK.image),
+    folder: get("--graph-folder", FALLBACK.folder),
     active: get("--graph-active", FALLBACK.active),
     link: get("--graph-link", FALLBACK.link),
+    contains: get("--graph-contains", FALLBACK.contains),
     text: get("--graph-text", FALLBACK.text),
   };
 }
 
 type GraphViewProps = {
-  notes: Note[];
-  edges: GraphLink[];
+  items: Note[];
+  edges: GraphEdge[];
   activeId: string | null;
   backlinkCount: Record<string, number>;
   onOpen: (id: string) => void;
 };
 
 export function GraphView({
-  notes,
+  items,
   edges,
   activeId,
   backlinkCount,
@@ -75,21 +86,35 @@ export function GraphView({
     return () => observer.disconnect();
   }, []);
 
-  // Rebuild graph data only when the structure changes (ids/titles/backlink
-  // counts/edges) — not on every note content edit, which would otherwise
-  // restart the force simulation (e.g. ticking a checkbox in the editor).
-  const nodeSignature = notes
-    .map((n) => `${n.id}:${n.title}:${backlinkCount[n.id] ?? 0}`)
+  // Rebuild only when the structure changes (not on content edits).
+  const nodeSignature = items
+    .map((i) => {
+      const val =
+        i.type === "folder"
+          ? (i.childIds?.length ?? 0)
+          : (backlinkCount[i.id] ?? 0);
+      return `${i.id}:${i.title}:${i.type}:${val}`;
+    })
     .join("|");
-  const edgeSignature = edges.map((e) => `${e.source}>${e.target}`).join("|");
+  const edgeSignature = edges
+    .map((e) => `${e.source}>${e.target}:${e.kind}`)
+    .join("|");
   const graphData = useMemo<{ nodes: GraphNode[]; links: GraphLink[] }>(
     () => ({
-      nodes: notes.map((n) => ({
-        id: n.id,
-        name: n.title,
-        val: 1 + (backlinkCount[n.id] ?? 0),
+      nodes: items.map((item) => ({
+        id: item.id,
+        name: item.title,
+        type: item.type,
+        val:
+          item.type === "folder"
+            ? Math.max(1, item.childIds?.length ?? 1)
+            : 1 + (backlinkCount[item.id] ?? 0),
       })),
-      links: edges.map((e) => ({ source: e.source, target: e.target })),
+      links: edges.map((e) => ({
+        source: e.source,
+        target: e.target,
+        kind: e.kind,
+      })),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [nodeSignature, edgeSignature],

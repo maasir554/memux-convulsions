@@ -7,20 +7,33 @@ import ForceGraph2D, {
   type NodeObject,
 } from "react-force-graph-2d";
 
+import type { ItemType } from "@/lib/mock-notes";
+
 export type GraphNode = {
   id: string;
   name: string;
+  type: ItemType;
   val: number;
   x?: number;
   y?: number;
 };
 
-export type GraphLink = { source: string; target: string };
+export type GraphLink = {
+  source: string;
+  target: string;
+  kind: "link" | "contains";
+};
 
 export type GraphColors = {
-  node: string;
+  markdown: string;
+  code: string;
+  csv: string;
+  pdf: string;
+  image: string;
+  folder: string;
   active: string;
   link: string;
+  contains: string;
   text: string;
 };
 
@@ -34,12 +47,16 @@ type ForceGraphCanvasProps = {
 };
 
 const radius = (node: GraphNode) => 1.5 + Math.sqrt(node.val) * 0.8;
+const hitRadius = (node: GraphNode) => Math.max(radius(node) + 5, 8);
 
-// Offscreen context just for measuring label widths during hit-testing.
 const measureCtx =
   typeof document !== "undefined"
     ? document.createElement("canvas").getContext("2d")
     : null;
+
+function endpointId(end: string | number | NodeObject<GraphNode>): string {
+  return typeof end === "object" ? String(end.id) : String(end);
+}
 
 export default function ForceGraphCanvas({
   width,
@@ -49,30 +66,26 @@ export default function ForceGraphCanvas({
   activeId,
   onOpen,
 }: ForceGraphCanvasProps) {
-  const fgRef =
-    useRef<
-      ForceGraphMethods<NodeObject<GraphNode>, LinkObject<GraphNode, GraphLink>>
-    >(undefined);
+  const fgRef = useRef<
+    ForceGraphMethods<NodeObject<GraphNode>, LinkObject<GraphNode, GraphLink>>
+  >(undefined);
   const downPos = useRef<{ x: number; y: number } | null>(null);
-  const tooltipRef = useRef<HTMLDivElement>(null);
 
-  // Our own hit-test (the library's shadow-canvas detection misses some nodes).
   function nodeAt(graphX: number, graphY: number): GraphNode | null {
     const scale = fgRef.current?.zoom() ?? 1;
     const fontSize = Math.max(12 / scale, 3);
     for (const node of graphData.nodes) {
       if (node.x === undefined || node.y === undefined) continue;
       const r = radius(node);
-      // dot
-      if (Math.hypot(node.x - graphX, node.y - graphY) <= r + 4) return node;
-      // label box
+      if (Math.hypot(node.x - graphX, node.y - graphY) <= hitRadius(node)) {
+        return node;
+      }
       if (measureCtx) {
         measureCtx.font = `${fontSize}px ui-sans-serif, system-ui, sans-serif`;
         const halfText = measureCtx.measureText(node.name).width / 2 + 2;
         const withinX = Math.abs(graphX - node.x) <= halfText;
         const withinY =
-          graphY >= node.y + r &&
-          graphY <= node.y + r + 1.5 + fontSize + 2;
+          graphY >= node.y + r && graphY <= node.y + r + 1.5 + fontSize + 2;
         if (withinX && withinY) return node;
       }
     }
@@ -87,7 +100,6 @@ export default function ForceGraphCanvas({
     const fg = fgRef.current;
     if (!fg) return;
     const down = downPos.current;
-    // Ignore pans/drags (only treat near-stationary press as a click).
     if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const { x, y } = fg.screen2GraphCoords(
@@ -98,45 +110,12 @@ export default function ForceGraphCanvas({
     if (node) onOpen(node.id);
   }
 
-  // Custom hover tooltip (the library's native one uses the same broken hit
-  // detection, so it skipped some nodes). Updated via refs to avoid re-renders.
-  function handleMouseMove(e: MouseEvent<HTMLDivElement>) {
-    const fg = fgRef.current;
-    const tip = tooltipRef.current;
-    if (!fg || !tip) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const offsetX = e.clientX - rect.left;
-    const offsetY = e.clientY - rect.top;
-    const { x, y } = fg.screen2GraphCoords(offsetX, offsetY);
-    const node = nodeAt(x, y);
-    if (node) {
-      tip.textContent = node.name;
-      tip.style.left = `${offsetX + 12}px`;
-      tip.style.top = `${offsetY + 12}px`;
-      tip.style.display = "block";
-      e.currentTarget.style.cursor = "pointer";
-    } else {
-      tip.style.display = "none";
-      e.currentTarget.style.cursor = "default";
-    }
-  }
-
-  function handleMouseLeave() {
-    if (tooltipRef.current) tooltipRef.current.style.display = "none";
-  }
-
   return (
     <div
-      className="relative h-full w-full"
+      className="h-full w-full"
       onMouseDown={handleMouseDown}
       onClick={handleClick}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
     >
-      <div
-        ref={tooltipRef}
-        className="pointer-events-none absolute z-10 hidden max-w-48 truncate rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md"
-      />
       <ForceGraph2D<GraphNode, GraphLink>
         ref={fgRef}
         width={width}
@@ -146,9 +125,16 @@ export default function ForceGraphCanvas({
         cooldownTicks={120}
         enableNodeDrag={false}
         nodeLabel={() => ""}
-        linkColor={() => colors.link}
-        linkWidth={1}
-        linkDirectionalArrowLength={3}
+        linkWidth={(link) => (link.kind === "contains" ? 0.75 : 1)}
+        linkColor={(link) => {
+          if (link.kind !== "contains") return colors.link;
+          return endpointId(link.source) === activeId
+            ? colors.contains
+            : colors.link;
+        }}
+        linkDirectionalArrowLength={(link) =>
+          link.kind === "contains" ? 0 : 3
+        }
         linkDirectionalArrowRelPos={1}
         linkDirectionalArrowColor={() => colors.link}
         nodeCanvasObject={(node, ctx, scale) => {
@@ -158,7 +144,7 @@ export default function ForceGraphCanvas({
 
           ctx.beginPath();
           ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-          ctx.fillStyle = isActive ? colors.active : colors.node;
+          ctx.fillStyle = isActive ? colors.active : colors[node.type];
           ctx.fill();
 
           const fontSize = Math.max(12 / scale, 3);

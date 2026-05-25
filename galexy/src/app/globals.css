@@ -174,15 +174,27 @@
 
 /* Graph view canvas colors (hex so they're canvas-safe). */
 :root {
-  --graph-node: #1971c2;
+  --graph-markdown: #1971c2;
+  --graph-code: #2f9e44;
+  --graph-csv: #0c8599;
+  --graph-pdf: #e03131;
+  --graph-image: #9c36b5;
+  --graph-folder: #f08c00;
   --graph-active: #d6336c;
   --graph-link: #ced4da;
+  --graph-contains: #f08c00;
   --graph-text: #495057;
 }
 .dark {
-  --graph-node: #7aa2f7;
+  --graph-markdown: #7aa2f7;
+  --graph-code: #5cf08a;
+  --graph-csv: #3bc9db;
+  --graph-pdf: #ff8787;
+  --graph-image: #d0a3ff;
+  --graph-folder: #ffd43b;
   --graph-active: #ff6ac1;
   --graph-link: #3b3f51;
+  --graph-contains: #ffd43b;
   --graph-text: #c8ccd4;
 }
 

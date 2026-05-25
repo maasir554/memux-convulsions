@@ -7,16 +7,17 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { FileExplorer } from "@/components/galexy/file-explorer";
 import { GraphView } from "@/components/galexy/graph-view";
 import type { LeftView } from "@/components/galexy/ribbon";
-import type { Note } from "@/lib/mock-notes";
+import type { GraphEdge, Note } from "@/lib/mock-notes";
 
 type LeftSidebarProps = {
   view: LeftView;
   notes: Note[];
+  items: Note[];
   activeId: string;
   onOpen: (id: string) => void;
   query: string;
   onQueryChange: (value: string) => void;
-  edges: { source: string; target: string }[];
+  edges: GraphEdge[];
   backlinkCount: Record<string, number>;
 };
 
@@ -29,6 +30,7 @@ const VIEW_TITLES: Record<LeftView, string> = {
 export function LeftSidebar({
   view,
   notes,
+  items,
   activeId,
   onOpen,
   query,
@@ -106,7 +108,7 @@ export function LeftSidebar({
       {view === "graph" && (
         <div className="min-h-0 flex-1">
           <GraphView
-            notes={notes}
+            items={items}
             edges={edges}
             activeId={activeId || null}
             backlinkCount={backlinkCount}

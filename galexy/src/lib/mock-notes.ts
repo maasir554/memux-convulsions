@@ -1,22 +1,38 @@
-// Mock vault data + link helpers for the galexy (Obsidian-like) shell.
+// Mock vault data + helpers for the galexy (Obsidian-like) shell.
 // See galexy/OBSIDIAN.md for the product reference this models.
+
+export type ItemType =
+  | "markdown"
+  | "code"
+  | "csv"
+  | "pdf"
+  | "image"
+  | "folder";
 
 export type Note = {
   id: string;
   title: string;
-  folder: string; // "" = vault root
-  content: string; // raw markdown
+  folder: string; // parent folder name; "" = vault root
+  type: ItemType;
+  summary: string;
+  content: string; // markdown / code source; empty for src-backed files
   tags: string[];
   updatedAt: string; // ISO date
+  links?: string[]; // explicit outgoing links (item ids) for non-markdown files
+  src?: string; // public path for pdf / image / csv
+  language?: string; // for code items
+  childIds?: string[]; // for folder items
 };
 
-// --- The vault ---------------------------------------------------------------
+// --- The vault (files) -------------------------------------------------------
 
 export const NOTES: Note[] = [
   {
     id: "welcome",
     title: "Welcome",
     folder: "",
+    type: "markdown",
+    summary: "Start here — what galexy is and how to get around.",
     tags: ["start"],
     updatedAt: "2026-05-25",
     content: `# Welcome to galexy
@@ -37,6 +53,8 @@ This is a graph-based notebook, inspired by [[MEMUX]] and Obsidian.
     id: "memux",
     title: "MEMUX",
     folder: "Projects",
+    type: "markdown",
+    summary: "Team convulsions' hackathon entry — frictionless workflows.",
     tags: ["project", "hackathon"],
     updatedAt: "2026-05-25",
     content: `# MEMUX
@@ -56,6 +74,8 @@ Related: [[Welcome]], [[Zettelkasten]]
     id: "zettelkasten",
     title: "Zettelkasten",
     folder: "Concepts",
+    type: "markdown",
+    summary: "A method of interlinked atomic notes.",
     tags: ["method", "notes"],
     updatedAt: "2026-05-22",
     content: `# Zettelkasten
@@ -71,6 +91,8 @@ Powers the way [[MEMUX]] and a good [[Research Workflow]] organize knowledge.
     id: "graph-view",
     title: "Graph View",
     folder: "Concepts",
+    type: "markdown",
+    summary: "The force-directed visualization of the vault.",
     tags: ["feature", "visualization"],
     updatedAt: "2026-05-21",
     content: `# Graph View
@@ -86,6 +108,8 @@ The signature feature of [[MEMUX]].
     id: "productivity",
     title: "Productivity",
     folder: "",
+    type: "markdown",
+    summary: "The hackathon theme: the future of work.",
     tags: ["theme"],
     updatedAt: "2026-05-20",
     content: `# Productivity
@@ -99,6 +123,8 @@ The hackathon theme: the future of work. The core unit of real output is
     id: "deep-work",
     title: "Deep Work",
     folder: "Concepts",
+    type: "markdown",
+    summary: "Focused, undistracted effort on demanding work.",
     tags: ["focus"],
     updatedAt: "2026-05-19",
     content: `# Deep Work
@@ -112,6 +138,8 @@ shallow busywork. A key input to [[Productivity]].
     id: "research-workflow",
     title: "Research Workflow",
     folder: "Projects",
+    type: "markdown",
+    summary: "Read → capture → link → synthesize.",
     tags: ["workflow", "research"],
     updatedAt: "2026-05-18",
     content: `# Research Workflow
@@ -125,6 +153,8 @@ with regular [[Productivity]] reviews.
     id: "daily-2026-05-25",
     title: "Daily Note",
     folder: "Daily",
+    type: "markdown",
+    summary: "Tasks and notes for the day.",
     tags: ["daily"],
     updatedAt: "2026-05-25",
     content: `# 2026-05-25
@@ -135,7 +165,98 @@ with regular [[Productivity]] reviews.
 
 #daily`,
   },
+
+  // --- Non-markdown files ---------------------------------------------------
+  {
+    id: "slingshot-brief",
+    title: "Slingshot Brief",
+    folder: "Projects",
+    type: "pdf",
+    summary: "The AMD Slingshot Hackathon brief (PDF).",
+    tags: ["reference"],
+    updatedAt: "2026-05-24",
+    content: "",
+    src: "/files/slingshot-brief.pdf",
+    links: ["memux"],
+  },
+  {
+    id: "team-roster",
+    title: "Team Roster",
+    folder: "Projects",
+    type: "csv",
+    summary: "Team convulsions members and focus areas.",
+    tags: ["data"],
+    updatedAt: "2026-05-26",
+    content: "",
+    src: "/files/team-roster.csv",
+    links: ["memux"],
+  },
+  {
+    id: "architecture",
+    title: "Architecture",
+    folder: "Concepts",
+    type: "image",
+    summary: "System architecture diagram.",
+    tags: ["diagram"],
+    updatedAt: "2026-05-23",
+    content: "",
+    src: "/files/architecture.png",
+    links: ["memux", "graph-view"],
+  },
+  {
+    id: "build-graph",
+    title: "buildLinkGraph.ts",
+    folder: "Concepts",
+    type: "code",
+    language: "typescript",
+    summary: "Reference snippet for deriving the link graph.",
+    tags: ["code"],
+    updatedAt: "2026-05-22",
+    links: ["graph-view"],
+    content: `// Derive outgoing/backlink maps from item contents.
+export function buildLinkGraph(items: Item[]): LinkGraph {
+  const idByTitle = new Map(items.map((i) => [i.title.toLowerCase(), i.id]));
+  const outgoing: Record<string, string[]> = {};
+  for (const item of items) {
+    outgoing[item.id] = extractWikiLinkTitles(item.content)
+      .map((title) => idByTitle.get(title.toLowerCase()))
+      .filter((id): id is string => Boolean(id));
+  }
+  return { outgoing };
+}`,
+  },
 ];
+
+// --- Folders as first-class items -------------------------------------------
+
+export const FOLDER_PREFIX = "folder:";
+
+/** Derive folder items from the distinct folders that contain files. */
+export function deriveFolders(notes: Note[]): Note[] {
+  const childrenByFolder = new Map<string, string[]>();
+  for (const note of notes) {
+    if (!note.folder) continue;
+    const list = childrenByFolder.get(note.folder) ?? [];
+    list.push(note.id);
+    childrenByFolder.set(note.folder, list);
+  }
+  return [...childrenByFolder.entries()].map(([name, childIds]) => ({
+    id: `${FOLDER_PREFIX}${name}`,
+    title: name,
+    folder: "",
+    type: "folder" as const,
+    summary: `Folder — ${childIds.length} item${childIds.length === 1 ? "" : "s"}.`,
+    content: "",
+    tags: [],
+    updatedAt: "",
+    childIds,
+  }));
+}
+
+/** Files plus derived folder items (everything that can be a graph node). */
+export function buildItems(notes: Note[]): Note[] {
+  return [...notes, ...deriveFolders(notes)];
+}
 
 // --- Link parsing & graph ----------------------------------------------------
 
@@ -153,36 +274,62 @@ export function extractWikiLinkTitles(content: string): string[] {
 }
 
 export type LinkGraph = {
-  /** noteId -> ids of notes it links to */
+  /** itemId -> ids it links to */
   outgoing: Record<string, string[]>;
-  /** noteId -> ids of notes that link to it */
+  /** itemId -> ids that link to it */
   backlinks: Record<string, string[]>;
 };
 
-/** Build the outgoing/backlink index from the current note contents. */
-export function buildLinkGraph(notes: Note[]): LinkGraph {
-  const idByTitle = new Map(notes.map((n) => [n.title.toLowerCase(), n.id]));
+/**
+ * Build the outgoing/backlink index. Markdown items infer links from their
+ * [[wikilinks]]; other files use their explicit `links`.
+ */
+export function buildLinkGraph(items: Note[]): LinkGraph {
+  const idByTitle = new Map(items.map((i) => [i.title.toLowerCase(), i.id]));
   const outgoing: Record<string, string[]> = {};
   const backlinks: Record<string, string[]> = {};
 
-  for (const note of notes) {
-    outgoing[note.id] ??= [];
-    backlinks[note.id] ??= [];
+  for (const item of items) {
+    outgoing[item.id] ??= [];
+    backlinks[item.id] ??= [];
   }
 
-  for (const note of notes) {
+  for (const item of items) {
     const targets = new Set<string>();
-    for (const title of extractWikiLinkTitles(note.content)) {
-      const targetId = idByTitle.get(title.toLowerCase());
-      if (targetId && targetId !== note.id) targets.add(targetId);
+    if (item.type === "markdown") {
+      for (const title of extractWikiLinkTitles(item.content)) {
+        const targetId = idByTitle.get(title.toLowerCase());
+        if (targetId && targetId !== item.id) targets.add(targetId);
+      }
+    } else if (item.links) {
+      for (const id of item.links) if (id !== item.id) targets.add(id);
     }
     for (const targetId of targets) {
-      outgoing[note.id].push(targetId);
-      backlinks[targetId].push(note.id);
+      outgoing[item.id].push(targetId);
+      backlinks[targetId].push(item.id);
     }
   }
 
   return { outgoing, backlinks };
+}
+
+export type GraphEdge = {
+  source: string;
+  target: string;
+  kind: "link" | "contains";
+};
+
+/** Folder -> child containment edges (highlighted when a folder is active). */
+export function buildContainmentEdges(items: Note[]): GraphEdge[] {
+  const edges: GraphEdge[] = [];
+  for (const item of items) {
+    if (item.type === "folder" && item.childIds) {
+      for (const childId of item.childIds) {
+        edges.push({ source: item.id, target: childId, kind: "contains" });
+      }
+    }
+  }
+  return edges;
 }
 
 // --- Markdown helpers --------------------------------------------------------
@@ -220,7 +367,7 @@ export function toggleTaskInContent(content: string, lineIndex: number): string 
 
 export type VaultTree = { folder: string; notes: Note[] }[];
 
-/** Group notes by folder for the file explorer (root folder first). */
+/** Group files by folder for the file explorer (root folder first). */
 export function buildVaultTree(notes: Note[]): VaultTree {
   const byFolder = new Map<string, Note[]>();
   for (const note of notes) {

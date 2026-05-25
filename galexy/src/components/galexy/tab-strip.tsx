@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, FileText, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { ItemIcon } from "@/components/galexy/item-icon";
 import type { Note } from "@/lib/mock-notes";
 
 type TabStripProps = {
@@ -60,33 +61,33 @@ export function TabStrip({ tabs, activeId, onActivate, onClose }: TabStripProps)
         className="no-scrollbar flex h-full items-stretch overflow-x-auto scroll-smooth"
       >
         {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            data-tab-id={tab.id}
-            className={cn(
-              "group flex shrink-0 items-center gap-2 border-r px-3 text-sm",
-              tab.id === activeId
-                ? "bg-background text-foreground"
-                : "text-muted-foreground hover:bg-sidebar-accent",
-            )}
-          >
-            <button
-              type="button"
-              onClick={() => onActivate(tab.id)}
-              className="flex items-center gap-2 py-2"
+            <div
+              key={tab.id}
+              data-tab-id={tab.id}
+              className={cn(
+                "group flex shrink-0 items-center gap-2 border-r px-3 text-sm",
+                tab.id === activeId
+                  ? "bg-background text-foreground"
+                  : "text-muted-foreground hover:bg-sidebar-accent",
+              )}
             >
-              <FileText className="size-3.5" />
-              <span className="max-w-40 truncate">{tab.title}</span>
-            </button>
-            <button
-              type="button"
-              aria-label={`Close ${tab.title}`}
-              onClick={() => onClose(tab.id)}
-              className="rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100"
-            >
-              <X className="size-3.5" />
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => onActivate(tab.id)}
+                className="flex items-center gap-2 py-2"
+              >
+                <ItemIcon type={tab.type} className="size-3.5" />
+                <span className="max-w-40 truncate">{tab.title}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={`Close ${tab.title}`}
+                onClick={() => onClose(tab.id)}
+                className="rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
         ))}
       </div>
 
