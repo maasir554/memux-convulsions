@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { MarkdownView } from "@/components/galexy/markdown-view";
 import { MarkdownEditor } from "@/components/galexy/markdown-editor";
 import { TabStrip } from "@/components/galexy/tab-strip";
-import type { Note } from "@/lib/mock-notes";
+import { toggleTaskInContent, type Note } from "@/lib/mock-notes";
 
 type EditorMode = "read" | "edit";
 
@@ -86,6 +86,12 @@ export function EditorPane({
                 linkExists={linkExists}
                 onOpenWikiLink={onOpenWikiLink}
                 onOpenTag={onOpenTag}
+                onToggleTask={(lineIndex) =>
+                  onChange(
+                    activeNote.id,
+                    toggleTaskInContent(activeNote.content, lineIndex),
+                  )
+                }
               />
             </div>
           </div>

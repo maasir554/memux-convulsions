@@ -204,6 +204,18 @@ export function wordCount(content: string): number {
   return words ? words.length : 0;
 }
 
+/** Toggle the GFM task checkbox ([ ] <-> [x]) on a given 0-based line. */
+export function toggleTaskInContent(content: string, lineIndex: number): string {
+  const lines = content.split("\n");
+  if (lineIndex < 0 || lineIndex >= lines.length) return content;
+  lines[lineIndex] = lines[lineIndex].replace(
+    /^(\s*[-*+]\s+)\[([ xX])\]/,
+    (_match: string, prefix: string, mark: string) =>
+      `${prefix}[${mark.toLowerCase() === "x" ? " " : "x"}]`,
+  );
+  return lines.join("\n");
+}
+
 // --- File tree ---------------------------------------------------------------
 
 export type VaultTree = { folder: string; notes: Note[] }[];
