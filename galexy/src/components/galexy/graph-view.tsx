@@ -1,51 +1,20 @@
 "use client";
 
-import { type ComponentType, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 
 import type { Note } from "@/lib/mock-notes";
-
-type GraphNode = {
-  id: string;
-  name: string;
-  val: number;
-  x?: number;
-  y?: number;
-};
-
-type GraphLink = { source: string; target: string };
-
-type ForceGraphProps = {
-  width: number;
-  height: number;
-  graphData: { nodes: GraphNode[]; links: GraphLink[] };
-  backgroundColor?: string;
-  cooldownTicks?: number;
-  linkColor?: () => string;
-  linkWidth?: number;
-  linkDirectionalArrowLength?: number;
-  linkDirectionalArrowRelPos?: number;
-  linkDirectionalArrowColor?: () => string;
-  onNodeClick?: (node: GraphNode) => void;
-  nodeCanvasObject?: (
-    node: GraphNode,
-    ctx: CanvasRenderingContext2D,
-    scale: number,
-  ) => void;
-  nodePointerAreaPaint?: (
-    node: GraphNode,
-    color: string,
-    ctx: CanvasRenderingContext2D,
-    scale: number,
-  ) => void;
-};
+import type {
+  GraphColors,
+  GraphLink,
+  GraphNode,
+} from "@/components/galexy/force-graph-canvas";
 
 // Canvas + d3-force; client-only (touches window/canvas), so never SSR it.
-const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
-  ssr: false,
-}) as unknown as ComponentType<ForceGraphProps>;
-
-type GraphColors = { node: string; active: string; link: string; text: string };
+const ForceGraphCanvas = dynamic(
+  () => import("@/components/galexy/force-graph-canvas"),
+  { ssr: false },
+);
 
 const FALLBACK: GraphColors = {
   node: "#7aa2f7",
@@ -106,67 +75,30 @@ export function GraphView({
     return () => observer.disconnect();
   }, []);
 
-  // The graph is mounted only while visible (overlay over the editor), so the
-  // editor can't change notes underneath it — the simulation won't restart mid-view.
   const graphData = useMemo(
     () => ({
-      nodes: notes.map((n) => ({
-        id: n.id,
-        name: n.title,
-        val: 1 + (backlinkCount[n.id] ?? 0),
-      })),
-      links: edges.map((e) => ({ source: e.source, target: e.target })),
+      nodes: notes.map(
+        (n): GraphNode => ({
+          id: n.id,
+          name: n.title,
+          val: 1 + (backlinkCount[n.id] ?? 0),
+        }),
+      ),
+      links: edges.map((e): GraphLink => ({ source: e.source, target: e.target })),
     }),
     [notes, edges, backlinkCount],
   );
 
-  const radius = (node: GraphNode) => 1.5 + Math.sqrt(node.val) * 0.8;
-
   return (
     <div ref={containerRef} className="relative h-full w-full">
       {size.width > 0 && size.height > 0 && (
-        <ForceGraph2D
-            width={size.width}
-            height={size.height}
-            graphData={graphData}
-            backgroundColor="rgba(0,0,0,0)"
-            cooldownTicks={120}
-            linkColor={() => colors.link}
-            linkWidth={1}
-            linkDirectionalArrowLength={3}
-            linkDirectionalArrowRelPos={1}
-            linkDirectionalArrowColor={() => colors.link}
-            onNodeClick={(node) => onOpen(node.id)}
-            nodeCanvasObject={(node, ctx, scale) => {
-              if (node.x === undefined || node.y === undefined) return;
-              const r = radius(node);
-              const isActive = node.id === activeId;
-
-              ctx.beginPath();
-              ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-              ctx.fillStyle = isActive ? colors.active : colors.node;
-              ctx.fill();
-
-              const fontSize = Math.max(12 / scale, 3);
-              ctx.font = `${fontSize}px ui-sans-serif, system-ui, sans-serif`;
-              ctx.textAlign = "center";
-              ctx.textBaseline = "top";
-              ctx.fillStyle = isActive ? colors.active : colors.text;
-              ctx.fillText(node.name, node.x, node.y + r + 1.5);
-            }}
-            nodePointerAreaPaint={(node, color, ctx, scale) => {
-              if (node.x === undefined || node.y === undefined) return;
-              const r = radius(node);
-              const fontSize = Math.max(12 / scale, 3);
-              ctx.font = `${fontSize}px ui-sans-serif, system-ui, sans-serif`;
-              const textWidth = ctx.measureText(node.name).width;
-              // Hit area spans both the circle and its label below it.
-              const halfWidth = Math.max(r, textWidth / 2) + 2;
-              const top = node.y - r - 2;
-              const bottom = node.y + r + 1.5 + fontSize + 2;
-              ctx.fillStyle = color;
-              ctx.fillRect(node.x - halfWidth, top, halfWidth * 2, bottom - top);
-            }}
+        <ForceGraphCanvas
+          width={size.width}
+          height={size.height}
+          graphData={graphData}
+          colors={colors}
+          activeId={activeId}
+          onOpen={onOpen}
         />
       )}
     </div>
