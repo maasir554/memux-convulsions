@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MarkdownView } from "@/components/galexy/markdown-view";
+import { MarkdownEditor } from "@/components/galexy/markdown-editor";
 import type { Note } from "@/lib/mock-notes";
 
 type EditorMode = "read" | "edit";
@@ -101,26 +102,27 @@ export function EditorPane({
 
       {/* Body */}
       {activeNote ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-8 py-8">
-            {mode === "read" ? (
+        mode === "read" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-3xl px-8 py-8">
               <MarkdownView
                 content={activeNote.content}
                 linkExists={linkExists}
                 onOpenWikiLink={onOpenWikiLink}
                 onOpenTag={onOpenTag}
               />
-            ) : (
-              <textarea
-                value={activeNote.content}
-                onChange={(e) => onChange(activeNote.id, e.target.value)}
-                spellCheck={false}
-                className="min-h-full flex-1 resize-none bg-transparent font-mono text-sm leading-relaxed text-foreground/90 outline-none"
-                placeholder="Start writing in Markdown..."
-              />
-            )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="min-h-0 flex-1">
+            <div className="mx-auto h-full w-full max-w-3xl px-8 py-4">
+              <MarkdownEditor
+                value={activeNote.content}
+                onChange={(content) => onChange(activeNote.id, content)}
+              />
+            </div>
+          </div>
+        )
       ) : (
         <EmptyState />
       )}
