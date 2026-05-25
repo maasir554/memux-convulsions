@@ -128,3 +128,10 @@
     @apply font-sans;
   }
 }
+
+/* Animate resizable side panels only while toggling (the class is applied for
+   the duration of the toggle), so live drag-resizing stays lag-free. */
+.galexy-animating [data-slot="resizable-panel"] {
+  transition: flex 240ms ease;
+  will-change: flex;
+}

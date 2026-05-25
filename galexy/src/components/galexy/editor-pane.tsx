@@ -1,10 +1,8 @@
 "use client";
 
-import { FileText, PanelRight, X } from "lucide-react";
+import { FileText, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Note } from "@/lib/mock-notes";
 
 type EditorPaneProps = {
@@ -14,8 +12,6 @@ type EditorPaneProps = {
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
   onChange: (id: string, content: string) => void;
-  onToggleRight: () => void;
-  rightCollapsed: boolean;
 };
 
 export function EditorPane({
@@ -25,66 +21,39 @@ export function EditorPane({
   onActivate,
   onClose,
   onChange,
-  onToggleRight,
-  rightCollapsed,
 }: EditorPaneProps) {
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
       {/* Tab bar */}
-      <div className="flex h-9 shrink-0 items-stretch border-b bg-sidebar">
-        <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={cn(
-                "group flex shrink-0 items-center gap-2 border-r px-3 text-sm",
-                tab.id === activeId
-                  ? "bg-background text-foreground"
-                  : "text-muted-foreground hover:bg-sidebar-accent",
-              )}
+      <div className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b bg-sidebar">
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={cn(
+              "group flex shrink-0 items-center gap-2 border-r px-3 text-sm",
+              tab.id === activeId
+                ? "bg-background text-foreground"
+                : "text-muted-foreground hover:bg-sidebar-accent",
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => onActivate(tab.id)}
+              className="flex items-center gap-2 py-2"
             >
-              <button
-                type="button"
-                onClick={() => onActivate(tab.id)}
-                className="flex items-center gap-2 py-2"
-              >
-                <FileText className="size-3.5" />
-                <span className="max-w-40 truncate">{tab.title}</span>
-              </button>
-              <button
-                type="button"
-                aria-label={`Close ${tab.title}`}
-                onClick={() => onClose(tab.id)}
-                className="rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {/* Right-sidebar toggle, pinned to the right */}
-        <div className="flex shrink-0 items-center border-l px-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 text-muted-foreground hover:text-foreground"
-                onClick={onToggleRight}
-                aria-label={
-                  rightCollapsed ? "Show right sidebar" : "Hide right sidebar"
-                }
-                aria-pressed={!rightCollapsed}
-              >
-                <PanelRight className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left">
-              {rightCollapsed ? "Show right sidebar" : "Hide right sidebar"}
-            </TooltipContent>
-          </Tooltip>
-        </div>
+              <FileText className="size-3.5" />
+              <span className="max-w-40 truncate">{tab.title}</span>
+            </button>
+            <button
+              type="button"
+              aria-label={`Close ${tab.title}`}
+              onClick={() => onClose(tab.id)}
+              className="rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        ))}
       </div>
 
       {/* Editor body */}

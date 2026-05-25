@@ -1,9 +1,11 @@
 "use client";
 
-import { Hash, Link2, ListTree, CornerUpRight } from "lucide-react";
+import { Hash, Link2, ListTree, CornerUpRight, PanelRight } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { extractHeadings, type Note } from "@/lib/mock-notes";
 
 type RightSidebarProps = {
@@ -11,6 +13,7 @@ type RightSidebarProps = {
   backlinks: Note[];
   outgoing: Note[];
   onOpen: (id: string) => void;
+  onToggleRight: () => void;
 };
 
 export function RightSidebar({
@@ -18,13 +21,29 @@ export function RightSidebar({
   backlinks,
   outgoing,
   onOpen,
+  onToggleRight,
 }: RightSidebarProps) {
   const headings = activeNote ? extractHeadings(activeNote.content) : [];
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex h-9 shrink-0 items-center border-b px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-        {activeNote ? activeNote.title : "No note"}
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b pr-1 pl-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        <span className="truncate">{activeNote ? activeNote.title : "No note"}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="ml-auto size-7 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={onToggleRight}
+              aria-label="Hide right sidebar"
+              aria-pressed
+            >
+              <PanelRight className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Hide right sidebar</TooltipContent>
+        </Tooltip>
       </div>
 
       <ScrollArea className="flex-1">

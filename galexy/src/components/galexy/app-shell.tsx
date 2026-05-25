@@ -1,18 +1,25 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { PanelRight } from "lucide-react";
+import { usePanelRef, type PanelSize } from "react-resizable-panels";
 
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { Ribbon, type LeftView } from "@/components/galexy/ribbon";
 import { LeftSidebar } from "@/components/galexy/left-sidebar";
 import { EditorPane } from "@/components/galexy/editor-pane";
 import { RightSidebar } from "@/components/galexy/right-sidebar";
 import { StatusBar } from "@/components/galexy/status-bar";
 import { buildLinkGraph, NOTES, type Note } from "@/lib/mock-notes";
+
+const ANIM_MS = 240;
 
 export function AppShell() {
   const [notes, setNotes] = useState<Note[]>(NOTES);
@@ -21,7 +28,51 @@ export function AppShell() {
   const [leftView, setLeftView] = useState<LeftView>("files");
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [animating, setAnimating] = useState(false);
   const [query, setQuery] = useState("");
+
+  const leftPanel = usePanelRef();
+  const rightPanel = usePanelRef();
+  const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Drive the imperative collapse/expand from React state (the CSS transition
+  // on .galexy-animating animates the resulting flex change).
+  useEffect(() => {
+    const panel = leftPanel.current;
+    if (!panel) return;
+    if (leftCollapsed) panel.collapse();
+    else panel.expand();
+  }, [leftCollapsed, leftPanel]);
+
+  useEffect(() => {
+    const panel = rightPanel.current;
+    if (!panel) return;
+    if (rightCollapsed) panel.collapse();
+    else panel.expand();
+  }, [rightCollapsed, rightPanel]);
+
+  useEffect(
+    () => () => {
+      if (animTimer.current) clearTimeout(animTimer.current);
+    },
+    [],
+  );
+
+  function pulseAnimation() {
+    setAnimating(true);
+    if (animTimer.current) clearTimeout(animTimer.current);
+    animTimer.current = setTimeout(() => setAnimating(false), ANIM_MS + 40);
+  }
+
+  function toggleLeft() {
+    pulseAnimation();
+    setLeftCollapsed((v) => !v);
+  }
+
+  function toggleRight() {
+    pulseAnimation();
+    setRightCollapsed((v) => !v);
+  }
 
   const byId = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes]);
   const linkGraph = useMemo(() => buildLinkGraph(notes), [notes]);
@@ -58,44 +109,57 @@ export function AppShell() {
 
   function selectLeftView(view: LeftView) {
     if (!leftCollapsed && view === leftView) {
-      setLeftCollapsed(true); // toggle off if re-clicking the active view
+      toggleLeft(); // re-clicking the active view collapses the sidebar
       return;
     }
     setLeftView(view);
-    setLeftCollapsed(false);
+    if (leftCollapsed) toggleLeft();
   }
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden">
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         <Ribbon
           leftView={leftView}
           onSelectLeftView={selectLeftView}
-          onToggleLeft={() => setLeftCollapsed((v) => !v)}
+          onToggleLeft={toggleLeft}
           leftCollapsed={leftCollapsed}
         />
 
-        <ResizablePanelGroup orientation="horizontal" className="min-w-0 flex-1">
-          {!leftCollapsed && (
-            <>
-              <ResizablePanel
-                id="left"
-                defaultSize="20%"
-                minSize="14%"
-                maxSize="34%"
-              >
-                <LeftSidebar
-                  view={leftView}
-                  notes={notes}
-                  activeId={activeId ?? ""}
-                  onOpen={openNote}
-                  query={query}
-                  onQueryChange={setQuery}
-                />
-              </ResizablePanel>
-              <ResizableHandle withHandle />
-            </>
-          )}
+        <ResizablePanelGroup
+          orientation="horizontal"
+          className={cn("min-w-0 flex-1", animating && "galexy-animating")}
+        >
+          <ResizablePanel
+            id="left"
+            panelRef={leftPanel}
+            collapsible
+            collapsedSize="0%"
+            defaultSize="20%"
+            minSize="14%"
+            maxSize="34%"
+            onResize={(size: PanelSize) =>
+              setLeftCollapsed(size.asPercentage < 1)
+            }
+            className="overflow-hidden"
+          >
+            <LeftSidebar
+              view={leftView}
+              notes={notes}
+              activeId={activeId ?? ""}
+              onOpen={openNote}
+              query={query}
+              onQueryChange={setQuery}
+            />
+          </ResizablePanel>
+
+          <ResizableHandle
+            withHandle
+            className={cn(
+              "transition-opacity duration-200",
+              leftCollapsed && "pointer-events-none opacity-0",
+            )}
+          />
 
           <ResizablePanel id="main" defaultSize="58%" minSize="30%">
             <EditorPane
@@ -105,30 +169,61 @@ export function AppShell() {
               onActivate={setActiveId}
               onClose={closeTab}
               onChange={updateContent}
-              onToggleRight={() => setRightCollapsed((v) => !v)}
-              rightCollapsed={rightCollapsed}
             />
           </ResizablePanel>
 
-          {!rightCollapsed && (
-            <>
-              <ResizableHandle withHandle />
-              <ResizablePanel
-                id="right"
-                defaultSize="22%"
-                minSize="16%"
-                maxSize="34%"
-              >
-                <RightSidebar
-                  activeNote={activeNote}
-                  backlinks={backlinks}
-                  outgoing={outgoing}
-                  onOpen={openNote}
-                />
-              </ResizablePanel>
-            </>
-          )}
+          <ResizableHandle
+            withHandle
+            className={cn(
+              "transition-opacity duration-200",
+              rightCollapsed && "pointer-events-none opacity-0",
+            )}
+          />
+
+          <ResizablePanel
+            id="right"
+            panelRef={rightPanel}
+            collapsible
+            collapsedSize="0%"
+            defaultSize="22%"
+            minSize="16%"
+            maxSize="34%"
+            onResize={(size: PanelSize) =>
+              setRightCollapsed(size.asPercentage < 1)
+            }
+            className="overflow-hidden"
+          >
+            <RightSidebar
+              activeNote={activeNote}
+              backlinks={backlinks}
+              outgoing={outgoing}
+              onOpen={openNote}
+              onToggleRight={toggleRight}
+            />
+          </ResizablePanel>
         </ResizablePanelGroup>
+
+        {/* Keep a right-sidebar trigger pinned to the rightmost edge even when
+            the panel is collapsed. */}
+        {rightCollapsed && (
+          <div className="absolute top-0 right-0 flex h-9 items-center border-b border-l bg-sidebar px-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 text-muted-foreground hover:text-foreground"
+                  onClick={toggleRight}
+                  aria-label="Show right sidebar"
+                  aria-pressed={false}
+                >
+                  <PanelRight className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Show right sidebar</TooltipContent>
+            </Tooltip>
+          </div>
+        )}
       </div>
 
       <StatusBar activeNote={activeNote} backlinkCount={backlinks.length} />
