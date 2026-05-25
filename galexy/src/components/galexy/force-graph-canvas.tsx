@@ -28,11 +28,9 @@ type ForceGraphCanvasProps = {
   onOpen: (id: string) => void;
 };
 
-// Small visible circle...
+// Small visible circle (the click target is handled by the library's default
+// hit detection, sized via nodeRelSize below).
 const radius = (node: GraphNode) => 1.5 + Math.sqrt(node.val) * 0.8;
-// ...but a comfortable invisible click target (not wide enough to occlude
-// neighbouring nodes' hit areas).
-const hitRadius = (node: GraphNode) => Math.max(radius(node) + 5, 8);
 
 export default function ForceGraphCanvas({
   width,
@@ -49,6 +47,7 @@ export default function ForceGraphCanvas({
       graphData={graphData}
       backgroundColor="rgba(0,0,0,0)"
       cooldownTicks={120}
+      nodeRelSize={6}
       linkColor={() => colors.link}
       linkWidth={1}
       linkDirectionalArrowLength={3}
@@ -71,13 +70,6 @@ export default function ForceGraphCanvas({
         ctx.textBaseline = "top";
         ctx.fillStyle = isActive ? colors.active : colors.text;
         ctx.fillText(node.name, node.x, node.y + r + 1.5);
-      }}
-      nodePointerAreaPaint={(node, color, ctx) => {
-        if (node.x === undefined || node.y === undefined) return;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, hitRadius(node), 0, 2 * Math.PI);
-        ctx.fill();
       }}
     />
   );
