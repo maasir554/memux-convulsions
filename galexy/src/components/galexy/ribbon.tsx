@@ -15,11 +15,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/galexy/theme-toggle";
 
-export type LeftView = "files" | "search";
+export type LeftView = "files" | "search" | "graph";
 
 const VIEWS: { id: LeftView; label: string; icon: LucideIcon }[] = [
   { id: "files", label: "Files", icon: FileText },
   { id: "search", label: "Search", icon: Search },
+  { id: "graph", label: "Graph view", icon: Network },
 ];
 
 type RibbonProps = {
@@ -27,8 +28,6 @@ type RibbonProps = {
   onSelectLeftView: (view: LeftView) => void;
   onToggleLeft: () => void;
   leftCollapsed: boolean;
-  onToggleGraph: () => void;
-  graphActive: boolean;
 };
 
 function RibbonButton({
@@ -69,8 +68,6 @@ export function Ribbon({
   onSelectLeftView,
   onToggleLeft,
   leftCollapsed,
-  onToggleGraph,
-  graphActive,
 }: RibbonProps) {
   return (
     <div className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r bg-sidebar py-2">
@@ -83,13 +80,6 @@ export function Ribbon({
           onClick={() => onSelectLeftView(view.id)}
         />
       ))}
-
-      <RibbonButton
-        label="Graph view"
-        icon={Network}
-        active={graphActive}
-        onClick={onToggleGraph}
-      />
 
       <Separator className="my-1 w-6" />
 

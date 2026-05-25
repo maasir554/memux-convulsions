@@ -5,6 +5,7 @@ import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FileExplorer } from "@/components/galexy/file-explorer";
+import { GraphView } from "@/components/galexy/graph-view";
 import type { LeftView } from "@/components/galexy/ribbon";
 import type { Note } from "@/lib/mock-notes";
 
@@ -15,11 +16,14 @@ type LeftSidebarProps = {
   onOpen: (id: string) => void;
   query: string;
   onQueryChange: (value: string) => void;
+  edges: { source: string; target: string }[];
+  backlinkCount: Record<string, number>;
 };
 
 const VIEW_TITLES: Record<LeftView, string> = {
   files: "Galexy Vault",
   search: "Search",
+  graph: "Graph view",
 };
 
 export function LeftSidebar({
@@ -29,6 +33,8 @@ export function LeftSidebar({
   onOpen,
   query,
   onQueryChange,
+  edges,
+  backlinkCount,
 }: LeftSidebarProps) {
   const results =
     query.trim().length > 0
@@ -97,6 +103,17 @@ export function LeftSidebar({
         </div>
       )}
 
+      {view === "graph" && (
+        <div className="min-h-0 flex-1">
+          <GraphView
+            notes={notes}
+            edges={edges}
+            activeId={activeId || null}
+            backlinkCount={backlinkCount}
+            onOpen={onOpen}
+          />
+        </div>
+      )}
     </div>
   );
 }

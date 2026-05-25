@@ -2,9 +2,7 @@
 
 import { type ComponentType, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Network, X } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import type { Note } from "@/lib/mock-notes";
 
 type GraphNode = {
@@ -74,7 +72,6 @@ type GraphViewProps = {
   activeId: string | null;
   backlinkCount: Record<string, number>;
   onOpen: (id: string) => void;
-  onClose: () => void;
 };
 
 export function GraphView({
@@ -83,7 +80,6 @@ export function GraphView({
   activeId,
   backlinkCount,
   onOpen,
-  onClose,
 }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -126,24 +122,9 @@ export function GraphView({
   const radius = (node: GraphNode) => 3 + Math.sqrt(node.val) * 1.6;
 
   return (
-    <div className="flex h-full flex-col bg-background">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-        <Network className="size-3.5" />
-        <span>Graph view</span>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="ml-auto size-7 text-muted-foreground hover:text-foreground"
-          onClick={onClose}
-          aria-label="Close graph"
-        >
-          <X className="size-4" />
-        </Button>
-      </div>
-
-      <div ref={containerRef} className="relative min-h-0 flex-1">
-        {size.width > 0 && size.height > 0 && (
-          <ForceGraph2D
+    <div ref={containerRef} className="relative h-full w-full">
+      {size.width > 0 && size.height > 0 && (
+        <ForceGraph2D
             width={size.width}
             height={size.height}
             graphData={graphData}
@@ -179,9 +160,8 @@ export function GraphView({
               ctx.arc(node.x, node.y, radius(node) + 3, 0, 2 * Math.PI);
               ctx.fill();
             }}
-          />
-        )}
-      </div>
+        />
+      )}
     </div>
   );
 }
