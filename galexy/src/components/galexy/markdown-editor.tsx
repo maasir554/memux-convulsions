@@ -81,6 +81,7 @@ export function MarkdownEditor({ value, onChange }: MarkdownEditorProps) {
       value={value}
       onChange={onChange}
       extensions={extensions}
+      theme="none"
       height="100%"
       className="h-full text-sm"
       basicSetup={{
