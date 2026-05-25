@@ -119,7 +119,7 @@ export function GraphView({
     [notes, edges, backlinkCount],
   );
 
-  const radius = (node: GraphNode) => 3 + Math.sqrt(node.val) * 1.6;
+  const radius = (node: GraphNode) => 1.5 + Math.sqrt(node.val) * 0.8;
 
   return (
     <div ref={containerRef} className="relative h-full w-full">
