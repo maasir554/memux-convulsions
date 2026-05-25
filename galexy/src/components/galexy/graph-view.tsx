@@ -36,6 +36,7 @@ type ForceGraphProps = {
     node: GraphNode,
     color: string,
     ctx: CanvasRenderingContext2D,
+    scale: number,
   ) => void;
 };
 
@@ -153,12 +154,18 @@ export function GraphView({
               ctx.fillStyle = isActive ? colors.active : colors.text;
               ctx.fillText(node.name, node.x, node.y + r + 1.5);
             }}
-            nodePointerAreaPaint={(node, color, ctx) => {
+            nodePointerAreaPaint={(node, color, ctx, scale) => {
               if (node.x === undefined || node.y === undefined) return;
+              const r = radius(node);
+              const fontSize = Math.max(12 / scale, 3);
+              ctx.font = `${fontSize}px ui-sans-serif, system-ui, sans-serif`;
+              const textWidth = ctx.measureText(node.name).width;
+              // Hit area spans both the circle and its label below it.
+              const halfWidth = Math.max(r, textWidth / 2) + 2;
+              const top = node.y - r - 2;
+              const bottom = node.y + r + 1.5 + fontSize + 2;
               ctx.fillStyle = color;
-              ctx.beginPath();
-              ctx.arc(node.x, node.y, radius(node) + 3, 0, 2 * Math.PI);
-              ctx.fill();
+              ctx.fillRect(node.x - halfWidth, top, halfWidth * 2, bottom - top);
             }}
         />
       )}
