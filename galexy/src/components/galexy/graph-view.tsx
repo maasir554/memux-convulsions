@@ -75,18 +75,24 @@ export function GraphView({
     return () => observer.disconnect();
   }, []);
 
-  const graphData = useMemo(
+  // Rebuild graph data only when the structure changes (ids/titles/backlink
+  // counts/edges) — not on every note content edit, which would otherwise
+  // restart the force simulation (e.g. ticking a checkbox in the editor).
+  const nodeSignature = notes
+    .map((n) => `${n.id}:${n.title}:${backlinkCount[n.id] ?? 0}`)
+    .join("|");
+  const edgeSignature = edges.map((e) => `${e.source}>${e.target}`).join("|");
+  const graphData = useMemo<{ nodes: GraphNode[]; links: GraphLink[] }>(
     () => ({
-      nodes: notes.map(
-        (n): GraphNode => ({
-          id: n.id,
-          name: n.title,
-          val: 1 + (backlinkCount[n.id] ?? 0),
-        }),
-      ),
-      links: edges.map((e): GraphLink => ({ source: e.source, target: e.target })),
+      nodes: notes.map((n) => ({
+        id: n.id,
+        name: n.title,
+        val: 1 + (backlinkCount[n.id] ?? 0),
+      })),
+      links: edges.map((e) => ({ source: e.source, target: e.target })),
     }),
-    [notes, edges, backlinkCount],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nodeSignature, edgeSignature],
   );
 
   return (
