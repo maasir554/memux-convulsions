@@ -5,7 +5,6 @@ import {
   Search,
   Network,
   PanelLeft,
-  PanelRight,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -28,9 +27,7 @@ type RibbonProps = {
   leftView: LeftView;
   onSelectLeftView: (view: LeftView) => void;
   onToggleLeft: () => void;
-  onToggleRight: () => void;
   leftCollapsed: boolean;
-  rightCollapsed: boolean;
 };
 
 function RibbonButton({
@@ -70,9 +67,7 @@ export function Ribbon({
   leftView,
   onSelectLeftView,
   onToggleLeft,
-  onToggleRight,
   leftCollapsed,
-  rightCollapsed,
 }: RibbonProps) {
   return (
     <div className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r bg-sidebar py-2">
@@ -93,12 +88,6 @@ export function Ribbon({
         icon={PanelLeft}
         active={!leftCollapsed}
         onClick={onToggleLeft}
-      />
-      <RibbonButton
-        label={rightCollapsed ? "Show right sidebar" : "Hide right sidebar"}
-        icon={PanelRight}
-        active={!rightCollapsed}
-        onClick={onToggleRight}
       />
 
       <div className="mt-auto flex flex-col items-center gap-1">

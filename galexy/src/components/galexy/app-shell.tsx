@@ -72,9 +72,7 @@ export function AppShell() {
           leftView={leftView}
           onSelectLeftView={selectLeftView}
           onToggleLeft={() => setLeftCollapsed((v) => !v)}
-          onToggleRight={() => setRightCollapsed((v) => !v)}
           leftCollapsed={leftCollapsed}
-          rightCollapsed={rightCollapsed}
         />
 
         <ResizablePanelGroup orientation="horizontal" className="min-w-0 flex-1">
@@ -82,9 +80,9 @@ export function AppShell() {
             <>
               <ResizablePanel
                 id="left"
-                defaultSize={20}
-                minSize={12}
-                maxSize={32}
+                defaultSize="20%"
+                minSize="14%"
+                maxSize="34%"
               >
                 <LeftSidebar
                   view={leftView}
@@ -99,7 +97,7 @@ export function AppShell() {
             </>
           )}
 
-          <ResizablePanel id="main" defaultSize={60} minSize={30}>
+          <ResizablePanel id="main" defaultSize="58%" minSize="30%">
             <EditorPane
               tabs={tabs}
               activeId={activeId}
@@ -107,6 +105,8 @@ export function AppShell() {
               onActivate={setActiveId}
               onClose={closeTab}
               onChange={updateContent}
+              onToggleRight={() => setRightCollapsed((v) => !v)}
+              rightCollapsed={rightCollapsed}
             />
           </ResizablePanel>
 
@@ -115,9 +115,9 @@ export function AppShell() {
               <ResizableHandle withHandle />
               <ResizablePanel
                 id="right"
-                defaultSize={20}
-                minSize={14}
-                maxSize={32}
+                defaultSize="22%"
+                minSize="16%"
+                maxSize="34%"
               >
                 <RightSidebar
                   activeNote={activeNote}
