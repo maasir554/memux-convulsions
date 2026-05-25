@@ -14,6 +14,16 @@ import { remarkObsidian } from "@/lib/remark-obsidian";
 // checkbox node itself carries no position).
 const TaskLineContext = createContext<number | null>(null);
 
+// react-markdown percent-encodes spaces in hrefs (e.g. "Graph%20View"), so
+// decode the title back before resolving/navigating.
+function decodeWikiTitle(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 type MarkdownViewProps = {
   content: string;
   linkExists: (title: string) => boolean;
@@ -53,7 +63,7 @@ export function MarkdownView({
     a({ href, children, node, ...props }) {
       void node;
       if (href?.startsWith("wikilink:")) {
-        const title = href.slice("wikilink:".length);
+        const title = decodeWikiTitle(href.slice("wikilink:".length));
         const exists = linkExists(title);
         return (
           <button
