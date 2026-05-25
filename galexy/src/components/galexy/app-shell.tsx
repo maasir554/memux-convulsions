@@ -21,15 +21,16 @@ import {
   buildContainmentEdges,
   buildItems,
   buildLinkGraph,
-  NOTES,
   type GraphEdge,
   type Note,
 } from "@/lib/mock-notes";
+import { useVault } from "@/components/galexy/use-vault";
 
 const ANIM_MS = 240;
 
 export function AppShell() {
-  const [notes, setNotes] = useState<Note[]>(NOTES);
+  const { notes: loadedNotes, updateContent } = useVault();
+  const notes = useMemo(() => loadedNotes ?? [], [loadedNotes]);
   const [activeId, setActiveId] = useState<string | null>("welcome");
   const [openTabs, setOpenTabs] = useState<string[]>(["welcome"]);
   const [leftView, setLeftView] = useState<LeftView>("files");
@@ -130,12 +131,6 @@ export function AppShell() {
     });
   }
 
-  function updateContent(id: string, content: string) {
-    setNotes((notes) =>
-      notes.map((n) => (n.id === id ? { ...n, content } : n)),
-    );
-  }
-
   function openWikiLink(title: string) {
     const id = titleToId.get(title.toLowerCase());
     if (id) openNote(id);
@@ -158,6 +153,14 @@ export function AppShell() {
     }
     setLeftView(view);
     if (leftCollapsed) toggleLeft();
+  }
+
+  if (!loadedNotes) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-background text-sm text-muted-foreground">
+        Loading vault…
+      </div>
+    );
   }
 
   return (
