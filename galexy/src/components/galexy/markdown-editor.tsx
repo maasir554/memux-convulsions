@@ -9,29 +9,49 @@ import { tags as t } from "@lezer/highlight";
 // Render markdown tokens inline (bold is bold, italic italic, headings larger,
 // syntax markers dimmed) — Obsidian's source-mode feel.
 const markdownHighlight = HighlightStyle.define([
-  { tag: t.heading1, fontSize: "1.6em", fontWeight: "700", lineHeight: "1.4" },
-  { tag: t.heading2, fontSize: "1.35em", fontWeight: "700", lineHeight: "1.4" },
-  { tag: t.heading3, fontSize: "1.2em", fontWeight: "600" },
-  { tag: [t.heading4, t.heading5, t.heading6], fontWeight: "600" },
-  { tag: t.strong, fontWeight: "700", color: "var(--foreground)" },
-  { tag: t.emphasis, fontStyle: "italic" },
-  { tag: t.strikethrough, textDecoration: "line-through" },
-  { tag: t.link, color: "var(--primary)" },
-  { tag: t.url, color: "var(--muted-foreground)" },
+  {
+    tag: t.heading1,
+    color: "var(--cm-heading)",
+    fontSize: "1.6em",
+    fontWeight: "700",
+    lineHeight: "1.4",
+  },
+  {
+    tag: t.heading2,
+    color: "var(--cm-heading)",
+    fontSize: "1.35em",
+    fontWeight: "700",
+    lineHeight: "1.4",
+  },
+  {
+    tag: t.heading3,
+    color: "var(--cm-heading)",
+    fontSize: "1.2em",
+    fontWeight: "600",
+  },
+  {
+    tag: [t.heading4, t.heading5, t.heading6],
+    color: "var(--cm-heading)",
+    fontWeight: "600",
+  },
+  { tag: t.strong, color: "var(--cm-bold)", fontWeight: "700" },
+  { tag: t.emphasis, color: "var(--cm-italic)", fontStyle: "italic" },
+  {
+    tag: t.strikethrough,
+    color: "var(--cm-quote)",
+    textDecoration: "line-through",
+  },
+  { tag: [t.link, t.url, t.labelName], color: "var(--cm-link)" },
   {
     tag: t.monospace,
+    color: "var(--cm-code)",
     fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-    color: "var(--foreground)",
   },
-  { tag: t.quote, color: "var(--muted-foreground)", fontStyle: "italic" },
-  { tag: t.list, color: "var(--foreground)" },
-  { tag: t.contentSeparator, color: "var(--muted-foreground)" },
-  // Syntax markers (**, *, #, -, >, backticks, [[ ]]) rendered dim.
-  {
-    tag: [t.processingInstruction, t.meta, t.labelName],
-    color: "var(--muted-foreground)",
-    opacity: "0.6",
-  },
+  { tag: t.quote, color: "var(--cm-quote)", fontStyle: "italic" },
+  { tag: t.list, color: "var(--cm-list)" },
+  { tag: t.contentSeparator, color: "var(--cm-hr)" },
+  // Syntax markers (**, *, #, -, >, backticks).
+  { tag: [t.processingInstruction, t.meta], color: "var(--cm-marker)" },
 ]);
 
 const editorTheme = EditorView.theme(
