@@ -65,6 +65,10 @@ export function AppShell() {
   }
 
   const byId = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes]);
+  const titleToId = useMemo(
+    () => new Map(notes.map((n) => [n.title.toLowerCase(), n.id])),
+    [notes],
+  );
   const linkGraph = useMemo(() => buildLinkGraph(notes), [notes]);
 
   const activeNote = activeId ? (byId.get(activeId) ?? null) : null;
@@ -95,6 +99,21 @@ export function AppShell() {
     setNotes((notes) =>
       notes.map((n) => (n.id === id ? { ...n, content } : n)),
     );
+  }
+
+  function openWikiLink(title: string) {
+    const id = titleToId.get(title.toLowerCase());
+    if (id) openNote(id);
+  }
+
+  function wikiLinkExists(title: string) {
+    return titleToId.has(title.toLowerCase());
+  }
+
+  function openTag(tag: string) {
+    setQuery(tag);
+    setLeftView("search");
+    if (leftCollapsed) toggleLeft();
   }
 
   function selectLeftView(view: LeftView) {
@@ -159,6 +178,9 @@ export function AppShell() {
               onActivate={setActiveId}
               onClose={closeTab}
               onChange={updateContent}
+              linkExists={wikiLinkExists}
+              onOpenWikiLink={openWikiLink}
+              onOpenTag={openTag}
             />
           </ResizablePanel>
 
