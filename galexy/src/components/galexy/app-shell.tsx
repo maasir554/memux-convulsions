@@ -35,22 +35,6 @@ export function AppShell() {
   const rightPanel = usePanelRef();
   const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Drive the imperative collapse/expand from React state (the CSS transition
-  // on .galexy-animating animates the resulting flex change).
-  useEffect(() => {
-    const panel = leftPanel.current;
-    if (!panel) return;
-    if (leftCollapsed) panel.collapse();
-    else panel.expand();
-  }, [leftCollapsed, leftPanel]);
-
-  useEffect(() => {
-    const panel = rightPanel.current;
-    if (!panel) return;
-    if (rightCollapsed) panel.collapse();
-    else panel.expand();
-  }, [rightCollapsed, rightPanel]);
-
   useEffect(
     () => () => {
       if (animTimer.current) clearTimeout(animTimer.current);
@@ -65,13 +49,19 @@ export function AppShell() {
   }
 
   function toggleLeft() {
+    const panel = leftPanel.current;
+    if (!panel) return;
     pulseAnimation();
-    setLeftCollapsed((v) => !v);
+    if (leftCollapsed) panel.expand();
+    else panel.collapse();
   }
 
   function toggleRight() {
+    const panel = rightPanel.current;
+    if (!panel) return;
     pulseAnimation();
-    setRightCollapsed((v) => !v);
+    if (rightCollapsed) panel.expand();
+    else panel.collapse();
   }
 
   const byId = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes]);
@@ -134,7 +124,7 @@ export function AppShell() {
             id="left"
             panelRef={leftPanel}
             collapsible
-            collapsedSize="0%"
+            collapsedSize={0}
             defaultSize="20%"
             minSize="14%"
             maxSize="34%"
@@ -184,7 +174,7 @@ export function AppShell() {
             id="right"
             panelRef={rightPanel}
             collapsible
-            collapsedSize="0%"
+            collapsedSize={0}
             defaultSize="22%"
             minSize="16%"
             maxSize="34%"
