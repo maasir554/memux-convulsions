@@ -1,6 +1,6 @@
 "use client";
 
-import { Network, Search } from "lucide-react";
+import { Search } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -20,7 +20,6 @@ type LeftSidebarProps = {
 const VIEW_TITLES: Record<LeftView, string> = {
   files: "Galexy Vault",
   search: "Search",
-  graph: "Graph view",
 };
 
 export function LeftSidebar({
@@ -98,16 +97,6 @@ export function LeftSidebar({
         </div>
       )}
 
-      {view === "graph" && (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
-          <Network className="size-8" />
-          <p className="text-sm font-medium text-foreground">Graph view</p>
-          <p className="text-xs">
-            The force-directed graph lands here next. For now, explore links via
-            the editor and backlinks panel.
-          </p>
-        </div>
-      )}
     </div>
   );
 }

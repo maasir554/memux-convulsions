@@ -17,6 +17,7 @@ import { LeftSidebar } from "@/components/galexy/left-sidebar";
 import { EditorPane } from "@/components/galexy/editor-pane";
 import { RightSidebar } from "@/components/galexy/right-sidebar";
 import { StatusBar } from "@/components/galexy/status-bar";
+import { GraphView } from "@/components/galexy/graph-view";
 import { buildLinkGraph, NOTES, type Note } from "@/lib/mock-notes";
 
 const ANIM_MS = 240;
@@ -30,6 +31,7 @@ export function AppShell() {
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [animating, setAnimating] = useState(false);
   const [query, setQuery] = useState("");
+  const [showGraph, setShowGraph] = useState(false);
 
   const leftPanel = usePanelRef();
   const rightPanel = usePanelRef();
@@ -71,6 +73,22 @@ export function AppShell() {
   );
   const linkGraph = useMemo(() => buildLinkGraph(notes), [notes]);
 
+  const edges = useMemo(() => {
+    const list: { source: string; target: string }[] = [];
+    for (const [source, targets] of Object.entries(linkGraph.outgoing)) {
+      for (const target of targets) list.push({ source, target });
+    }
+    return list;
+  }, [linkGraph]);
+
+  const backlinkCount = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const [id, list] of Object.entries(linkGraph.backlinks)) {
+      counts[id] = list.length;
+    }
+    return counts;
+  }, [linkGraph]);
+
   const activeNote = activeId ? (byId.get(activeId) ?? null) : null;
   const tabs = openTabs.map((id) => byId.get(id)).filter(Boolean) as Note[];
 
@@ -82,6 +100,7 @@ export function AppShell() {
   function openNote(id: string) {
     setActiveId(id);
     setOpenTabs((tabs) => (tabs.includes(id) ? tabs : [...tabs, id]));
+    setShowGraph(false); // graph "opens" the note into the editor pane
   }
 
   function closeTab(id: string) {
@@ -125,6 +144,10 @@ export function AppShell() {
     if (leftCollapsed) toggleLeft();
   }
 
+  function toggleGraph() {
+    setShowGraph((v) => !v);
+  }
+
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden">
       <div className="relative flex min-h-0 flex-1">
@@ -133,6 +156,8 @@ export function AppShell() {
           onSelectLeftView={selectLeftView}
           onToggleLeft={toggleLeft}
           leftCollapsed={leftCollapsed}
+          onToggleGraph={toggleGraph}
+          graphActive={showGraph}
         />
 
         <ResizablePanelGroup
@@ -171,17 +196,31 @@ export function AppShell() {
           />
 
           <ResizablePanel id="main" defaultSize="58%" minSize="30%">
-            <EditorPane
-              tabs={tabs}
-              activeId={activeId}
-              activeNote={activeNote}
-              onActivate={setActiveId}
-              onClose={closeTab}
-              onChange={updateContent}
-              linkExists={wikiLinkExists}
-              onOpenWikiLink={openWikiLink}
-              onOpenTag={openTag}
-            />
+            <div className="relative h-full">
+              <EditorPane
+                tabs={tabs}
+                activeId={activeId}
+                activeNote={activeNote}
+                onActivate={setActiveId}
+                onClose={closeTab}
+                onChange={updateContent}
+                linkExists={wikiLinkExists}
+                onOpenWikiLink={openWikiLink}
+                onOpenTag={openTag}
+              />
+              {showGraph && (
+                <div className="absolute inset-0 z-20">
+                  <GraphView
+                    notes={notes}
+                    edges={edges}
+                    activeId={activeId}
+                    backlinkCount={backlinkCount}
+                    onOpen={openNote}
+                    onClose={() => setShowGraph(false)}
+                  />
+                </div>
+              )}
+            </div>
           </ResizablePanel>
 
           <ResizableHandle
