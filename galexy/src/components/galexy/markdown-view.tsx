@@ -1,6 +1,9 @@
 "use client";
 
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, {
+  type Components,
+  defaultUrlTransform,
+} from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { cn } from "@/lib/utils";
@@ -71,6 +74,11 @@ export function MarkdownView({
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkObsidian]}
+        urlTransform={(url) =>
+          url.startsWith("wikilink:") || url.startsWith("tag:")
+            ? url
+            : defaultUrlTransform(url)
+        }
         components={components}
       >
         {content}
