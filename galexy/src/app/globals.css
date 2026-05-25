@@ -130,6 +130,14 @@
   }
 }
 
+/* Hide scrollbars while keeping scroll behavior (e.g. the editor tab strip). */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Animate resizable side panels only while toggling (the class is applied for
    the duration of the toggle), so live drag-resizing stays lag-free. */
 .galexy-animating [data-slot="resizable-panel"] {

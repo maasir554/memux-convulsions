@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, Pencil, BookOpen, X } from "lucide-react";
+import { FileText, Pencil, BookOpen } from "lucide-react";
 
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MarkdownView } from "@/components/galexy/markdown-view";
 import { MarkdownEditor } from "@/components/galexy/markdown-editor";
+import { TabStrip } from "@/components/galexy/tab-strip";
 import type { Note } from "@/lib/mock-notes";
 
 type EditorMode = "read" | "edit";
@@ -41,36 +41,12 @@ export function EditorPane({
     <div className="flex h-full min-w-0 flex-col bg-background">
       {/* Tab bar */}
       <div className="flex h-9 shrink-0 items-stretch border-b bg-sidebar">
-        <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={cn(
-                "group flex shrink-0 items-center gap-2 border-r px-3 text-sm",
-                tab.id === activeId
-                  ? "bg-background text-foreground"
-                  : "text-muted-foreground hover:bg-sidebar-accent",
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => onActivate(tab.id)}
-                className="flex items-center gap-2 py-2"
-              >
-                <FileText className="size-3.5" />
-                <span className="max-w-40 truncate">{tab.title}</span>
-              </button>
-              <button
-                type="button"
-                aria-label={`Close ${tab.title}`}
-                onClick={() => onClose(tab.id)}
-                className="rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
+        <TabStrip
+          tabs={tabs}
+          activeId={activeId}
+          onActivate={onActivate}
+          onClose={onClose}
+        />
 
         {activeNote && (
           <div className="flex shrink-0 items-center border-l px-1">
