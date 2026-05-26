@@ -2,23 +2,15 @@
 
 import { useMemo, useRef } from "react";
 import { Workbook } from "@fortune-sheet/react";
-import type {
-  Cell,
-  CellWithRowAndCol,
-  Sheet,
-  Settings,
-} from "@fortune-sheet/core";
+import type { Cell, CellWithRowAndCol, Sheet } from "@fortune-sheet/core";
 import "@fortune-sheet/react/dist/index.css";
 
 import { parseCsv, serializeCsv } from "@/lib/csv";
 
-// fortune-sheet inherits luckysheet's CJK font defaults which render as serif
-// on macOS — force a clean sans-serif everywhere we can reach.
-const SANS = "Inter, Arial, Helvetica, sans-serif";
-
-function setCanvasFont(ctx: CanvasRenderingContext2D, size = 11) {
-  ctx.font = `${size}px ${SANS}`;
-}
+// fortune-sheet inherits luckysheet's CJK font defaults which can render as
+// serif on macOS. Stamp a sans-serif on every populated cell so the cell
+// renderer uses it.
+const SANS = "Arial, Helvetica, sans-serif";
 
 function csvToWorkbook(csv: string): Sheet[] {
   const rows = parseCsv(csv);
@@ -72,21 +64,6 @@ function workbookToCsv(sheets: Sheet[]): string {
   return serializeCsv(rows.map((r) => r.slice(0, lastCol + 1)));
 }
 
-const canvasFontHooks: Settings["hooks"] = {
-  beforeRenderCell: (_cell, _info, ctx) => {
-    setCanvasFont(ctx);
-    return false;
-  },
-  beforeRenderColumnHeaderCell: (_char, _idx, _l, _w, _h, ctx) => {
-    setCanvasFont(ctx);
-    return false;
-  },
-  beforeRenderRowHeaderCell: (_row, _idx, _t, _w, _h, ctx) => {
-    setCanvasFont(ctx);
-    return false;
-  },
-};
-
 type CsvSpreadsheetProps = {
   content: string;
   onChange: (content: string) => void;
@@ -116,7 +93,6 @@ export default function CsvSpreadsheet({
       <Workbook
         data={initialData}
         onChange={handleChange}
-        hooks={canvasFontHooks}
         showSheetTabs={false}
       />
     </div>

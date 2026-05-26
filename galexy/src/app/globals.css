@@ -131,93 +131,81 @@
 }
 
 /* --- fortune-sheet (CSV spreadsheet) theme overrides ---------------------- */
-/* Scoped to .galexy-spreadsheet; uses the app's theme variables so dark/light
-   adapt automatically. The canvas content stays light (fortune-sheet renders
-   cells on a canvas it controls); only the surrounding chrome is themed. */
-.galexy-spreadsheet,
-.galexy-spreadsheet * {
-  font-family: var(--font-sans), ui-sans-serif, system-ui, "Segoe UI",
-    Roboto, sans-serif !important;
-}
-.galexy-spreadsheet .fortune-container {
-  background: var(--background);
-  color: var(--foreground);
-}
-/* Toolbar */
+/* Scoped to .galexy-spreadsheet and *only* the chrome around the sheet.
+   The sheet area itself (cells, col/row headers — all canvas-rendered by
+   fortune-sheet) is intentionally left untouched. */
 .galexy-spreadsheet .fortune-toolbar {
   background: var(--sidebar);
   border-bottom: 1px solid var(--border);
   color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
 .galexy-spreadsheet .fortune-toolbar-button,
 .galexy-spreadsheet .fortune-toolbar-combo-button,
+.galexy-spreadsheet .fortune-toolbar-combo,
 .galexy-spreadsheet .fortune-toolbar-combo-text,
 .galexy-spreadsheet .fortune-toolbar-subtext,
 .galexy-spreadsheet .fortune-toolbar-select {
   color: var(--foreground);
+  font-family: inherit;
 }
 .galexy-spreadsheet .fortune-toolbar-button:hover,
 .galexy-spreadsheet .fortune-toolbar-combo-button:hover,
 .galexy-spreadsheet .fortune-toolbar-more-container:hover {
   background: var(--accent);
   color: var(--accent-foreground);
-  border-radius: var(--radius-sm);
 }
 .galexy-spreadsheet .fortune-toolbar-divider,
 .galexy-spreadsheet .fortune-toolbar-menu-divider,
 .galexy-spreadsheet .fortune-toolbar-menu-line {
   background: var(--border);
 }
-/* Name box + formula bar */
+
+/* Name box + formula bar (the strip directly above the sheet) */
 .galexy-spreadsheet .fortune-name-box-container,
 .galexy-spreadsheet .fortune-fx-input-container {
   background: var(--sidebar);
-  border-color: var(--border) !important;
+  border-color: var(--border);
   color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
 .galexy-spreadsheet .fortune-name-box,
 .galexy-spreadsheet .fortune-fx-input,
 .galexy-spreadsheet .fortune-fx-editor {
   background: var(--background);
   color: var(--foreground);
-  border-color: var(--border) !important;
+  font-family: inherit;
 }
 .galexy-spreadsheet .fortune-fx-icon {
   color: var(--muted-foreground);
 }
-/* Sheet tabs & zoom */
+
+/* Bottom sheet-tabs / zoom strip */
 .galexy-spreadsheet .fortune-sheet-area,
 .galexy-spreadsheet .fortune-sheet-area-right {
   background: var(--sidebar);
   border-top: 1px solid var(--border);
   color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
 .galexy-spreadsheet .fortune-sheet-list-item {
-  background: transparent;
   color: var(--muted-foreground);
-  border-color: var(--border);
 }
 .galexy-spreadsheet .fortune-sheet-list-item:hover {
   background: var(--accent);
   color: var(--accent-foreground);
 }
-.galexy-spreadsheet .fortune-sheet-list-item-name {
-  color: inherit;
-}
-.galexy-spreadsheet .fortune-zoom-container {
-  background: transparent;
+.galexy-spreadsheet .fortune-zoom-container,
+.galexy-spreadsheet .fortune-zoom-ratio-current,
+.galexy-spreadsheet .fortune-zoom-ratio-text {
   color: var(--muted-foreground);
 }
-.galexy-spreadsheet .fortune-zoom-button:hover,
-.galexy-spreadsheet .fortune-zoom-ratio-text:hover {
+.galexy-spreadsheet .fortune-zoom-button:hover {
   background: var(--accent);
   color: var(--accent-foreground);
 }
-.galexy-spreadsheet .fortune-zoom-ratio-current,
-.galexy-spreadsheet .fortune-zoom-ratio-text {
-  color: var(--foreground);
-}
-/* Popovers / menus */
+
+/* Popovers / menus / dialogs (float over the sheet area) */
 .galexy-spreadsheet .fortune-context-menu,
 .galexy-spreadsheet .fortune-toolbar-combo-popup,
 .galexy-spreadsheet .fortune-toolbar-color-picker,
@@ -228,6 +216,7 @@
   background: var(--popover);
   color: var(--popover-foreground);
   border: 1px solid var(--border);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
 .galexy-spreadsheet .fortune-context-menu .fortune-menuitem-row:hover,
 .galexy-spreadsheet .fortune-toolbar-select-option:hover,
@@ -237,11 +226,6 @@
 }
 .galexy-spreadsheet .fortune-context-menu-divider {
   background: var(--border);
-}
-/* Cell input (inline editor that appears when typing) */
-.galexy-spreadsheet .luckysheet-cell-input {
-  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif !important;
-  color: #1a1a1a;
 }
 
 /* Hide scrollbars while keeping scroll behavior (e.g. the editor tab strip). */
