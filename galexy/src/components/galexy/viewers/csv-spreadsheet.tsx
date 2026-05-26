@@ -151,17 +151,74 @@ export default function CsvSpreadsheet({
 
       univerAPI.createWorkbook(csvToWorkbookSnapshot(content));
 
+      // While the user is mid-edit the cell value isn't in the committed
+      // workbook snapshot. We track the in-progress value so debounced saves
+      // can patch it in, giving "save while typing" behaviour.
+      let editing: { row: number; col: number; value: string } | null = null;
+
+      const scheduleSave = () => {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+          const wb = univerAPI.getActiveWorkbook();
+          if (!wb) return;
+          const snap = wb.save();
+          if (editing) {
+            const sheetId =
+              snap.sheetOrder?.[0] ?? Object.keys(snap.sheets)[0];
+            const sheet = snap.sheets[sheetId] as
+              | { cellData?: Record<number, Record<number, { v?: unknown }>> }
+              | undefined;
+            if (sheet) {
+              if (!sheet.cellData) sheet.cellData = {};
+              if (!sheet.cellData[editing.row]) sheet.cellData[editing.row] = {};
+              sheet.cellData[editing.row][editing.col] = { v: editing.value };
+            }
+          }
+          onChangeRef.current(workbookToCsv(snap));
+        }, 300);
+      };
+
       const valueChangedDisposer = univerAPI.addEvent(
         univerAPI.Event.SheetValueChanged,
-        () => {
-          if (saveTimer) clearTimeout(saveTimer);
-          saveTimer = setTimeout(() => {
-            const wb = univerAPI.getActiveWorkbook();
-            if (!wb) return;
-            onChangeRef.current(workbookToCsv(wb.save()));
-          }, 300);
+        scheduleSave,
+      );
+      const editChangingDisposer = univerAPI.addEvent(
+        univerAPI.Event.SheetEditChanging,
+        (params) => {
+          editing = {
+            row: params.row,
+            col: params.column,
+            value: params.value.toPlainText(),
+          };
+          scheduleSave();
         },
       );
+      const editEndedDisposer = univerAPI.addEvent(
+        univerAPI.Event.SheetEditEnded,
+        () => {
+          editing = null;
+          // After commit, the snapshot already includes the value — flush
+          // without the editing-cell patch.
+          scheduleSave();
+        },
+      );
+
+      // Cmd/Ctrl+Z (undo) and Cmd+Shift+Z / Ctrl+Y (redo). We only intercept
+      // when focus is outside Univer's container — when focused inside,
+      // Univer's own shortcut handlers take care of it (avoids double-undo).
+      const onKey = (e: KeyboardEvent) => {
+        const mod = e.metaKey || e.ctrlKey;
+        if (!mod) return;
+        const key = e.key.toLowerCase();
+        const isUndo = key === "z" && !e.shiftKey;
+        const isRedo = (key === "z" && e.shiftKey) || key === "y";
+        if (!isUndo && !isRedo) return;
+        if (inner.contains(document.activeElement)) return; // Univer handles
+        e.preventDefault();
+        if (isRedo) void univerAPI.redo();
+        else void univerAPI.undo();
+      };
+      window.addEventListener("keydown", onKey);
 
       // De-duped theme sync: only react when the app's dark/light *actually*
       // flips. Univer itself manipulates class names on elements (including
@@ -181,8 +238,11 @@ export default function CsvSpreadsheet({
       });
 
       cleanupHandlers = [
+        () => window.removeEventListener("keydown", onKey),
         () => themeObserver.disconnect(),
         () => valueChangedDisposer.dispose(),
+        () => editChangingDisposer.dispose(),
+        () => editEndedDisposer.dispose(),
         () => univer.dispose(),
       ];
     });
