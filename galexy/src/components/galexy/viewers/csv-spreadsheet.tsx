@@ -10,6 +10,11 @@ import {
 import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
 import UniverPresetSheetsCoreEnUS from "@univerjs/preset-sheets-core/locales/en-US";
 
+// Univer's preset CSS isn't auto-imported by the JS — load the bundled
+// stylesheet ourselves or the UI renders unstyled (toolbar collapses,
+// context menus dump as plain text).
+import "@univerjs/presets/lib/styles/preset-sheets-core.css";
+
 import { parseCsv, serializeCsv } from "@/lib/csv";
 
 const CELL_FONT_FAMILY =
