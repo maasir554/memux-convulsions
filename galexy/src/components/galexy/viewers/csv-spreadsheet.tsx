@@ -7,10 +7,10 @@ import "@fortune-sheet/react/dist/index.css";
 
 import { parseCsv, serializeCsv } from "@/lib/csv";
 
-// fortune-sheet inherits luckysheet's CJK font defaults which can render as
-// serif on macOS. Stamp a sans-serif on every populated cell so the cell
-// renderer uses it.
-const SANS = "Arial, Helvetica, sans-serif";
+// fortune-sheet's `ff` is a numeric index into a hardcoded font array:
+// 0 = Times New Roman, 1 = Arial, 2 = Tahoma, 3 = Verdana.
+// Stamp Arial on every populated cell so the default (Times) doesn't apply.
+const ARIAL_FF = 1;
 
 function csvToWorkbook(csv: string): Sheet[] {
   const rows = parseCsv(csv);
@@ -23,7 +23,7 @@ function csvToWorkbook(csv: string): Sheet[] {
           v: value,
           m: value,
           ct: { fa: "General", t: "g" },
-          ff: SANS,
+          ff: ARIAL_FF,
         };
         celldata.push({ r, c, v: cell });
       }

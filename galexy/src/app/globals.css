@@ -133,7 +133,25 @@
 /* --- fortune-sheet (CSV spreadsheet) theme overrides ---------------------- */
 /* Scoped to .galexy-spreadsheet and *only* the chrome around the sheet.
    The sheet area itself (cells, col/row headers — all canvas-rendered by
-   fortune-sheet) is intentionally left untouched. */
+   fortune-sheet) gets a pragmatic dark-mode treatment via canvas filter
+   invert, since fortune-sheet has no real dark theme. */
+
+/* Dark mode: invert the canvas content so the sheet area appears dark.
+   Caveats: selections/highlights may take a slight hue shift; this is the
+   honest trade-off without forking fortune-sheet. */
+.dark .galexy-spreadsheet .fortune-sheet-container,
+.dark .galexy-spreadsheet .luckysheet-cell-sheettable {
+  background-color: #1a1a1a;
+}
+.dark .galexy-spreadsheet canvas {
+  filter: invert(1) hue-rotate(180deg);
+}
+/* Inline cell-edit input is a DOM element on top of the canvas — keep it
+   visually consistent with the (now dark) cells. */
+.dark .galexy-spreadsheet .luckysheet-cell-input {
+  background: #1a1a1a !important;
+  color: var(--foreground) !important;
+}
 .galexy-spreadsheet .fortune-toolbar {
   background: var(--sidebar);
   border-bottom: 1px solid var(--border);
