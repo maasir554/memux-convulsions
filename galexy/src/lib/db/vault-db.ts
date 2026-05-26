@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { ITEMS_DDL, items, type DbItem, type NewDbItem } from "@/lib/db/schema";
 import { NOTES, type ItemType, type Note } from "@/lib/mock-notes";
@@ -23,6 +23,7 @@ async function create(): Promise<VaultDb> {
   await client.exec(ITEMS_DDL);
   const db = drizzle(client, { schema: { items } });
   await seedIfEmpty(db);
+  await applyContentUpgrades(db);
   return db;
 }
 
@@ -32,6 +33,21 @@ async function seedIfEmpty(db: VaultDb): Promise<void> {
     .from(items);
   if (Number(row?.count ?? 0) > 0) return;
   await db.insert(items).values(NOTES.map(noteToRow));
+}
+
+/**
+ * Idempotent: if any seeded item still has empty content (e.g. an existing DB
+ * was seeded before this content was added), fill it. Safe across reloads —
+ * only touches rows whose content is still "".
+ */
+async function applyContentUpgrades(db: VaultDb): Promise<void> {
+  for (const seed of NOTES) {
+    if (!seed.content) continue;
+    await db
+      .update(items)
+      .set({ content: seed.content, updatedAt: new Date() })
+      .where(and(eq(items.id, seed.id), eq(items.content, "")));
+  }
 }
 
 // --- mapping -----------------------------------------------------------------

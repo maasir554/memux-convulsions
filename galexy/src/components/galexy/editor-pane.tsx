@@ -164,7 +164,11 @@ function Body({
     case "csv":
       return (
         <div className="min-h-0 flex-1">
-          <CsvViewer item={item} />
+          <CsvViewer
+            key={item.id}
+            item={item}
+            onChange={(content) => onChange(item.id, content)}
+          />
         </div>
       );
 

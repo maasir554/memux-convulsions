@@ -187,8 +187,12 @@ with regular [[Productivity]] reviews.
     summary: "Team convulsions members and focus areas.",
     tags: ["data"],
     updatedAt: "2026-05-26",
-    content: "",
-    src: "/files/team-roster.csv",
+    content: `name,role,focus,joined
+Maasir,Lead / Frontend,App shell & graph,2026-05-25
+Pankaj,Backend,Data & persistence,2026-05-25
+Aisha,Design,UX & theming,2026-05-26
+Ravi,Research,Workflows & notes,2026-05-26
+`,
     links: ["memux"],
   },
   {

@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { Plus, X } from "lucide-react";
 
-import { ViewerFallback } from "@/components/galexy/viewers/viewer-fallback";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { Note } from "@/lib/mock-notes";
+
+// --- CSV parse / serialize --------------------------------------------------
 
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -47,64 +51,150 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-export function CsvViewer({ item }: { item: Note }) {
-  const [rows, setRows] = useState<string[][] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+function escapeCell(value: string): string {
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
 
-  useEffect(() => {
-    if (!item.src) return;
-    let active = true;
-    fetch(item.src)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.text();
-      })
-      .then((text) => {
-        if (active) setRows(parseCsv(text));
-      })
-      .catch((err) => {
-        if (active) setError(err instanceof Error ? err.message : "Failed to load");
-      });
-    return () => {
-      active = false;
-    };
-  }, [item.src]);
+function serializeCsv(rows: string[][]): string {
+  return rows.map((row) => row.map(escapeCell).join(",")).join("\n") + "\n";
+}
 
-  if (!item.src) return <ViewerFallback label="No CSV source set for this file." />;
-  if (error) return <ViewerFallback label={`Couldn't load CSV — ${error}.`} />;
-  if (!rows) return <ViewerFallback label="Loading CSV…" />;
+// --- Component --------------------------------------------------------------
+
+type CsvViewerProps = {
+  item: Note;
+  onChange?: (content: string) => void;
+};
+
+export function CsvViewer({ item, onChange }: CsvViewerProps) {
+  const readOnly = !onChange;
+
+  const [rows, setRows] = useState<string[][]>(() => {
+    const parsed = parseCsv(item.content);
+    return parsed.length > 0 ? parsed : [[""]];
+  });
+
+  function commit(next: string[][]) {
+    setRows(next);
+    onChange?.(serializeCsv(next));
+  }
+
+  function updateCell(r: number, c: number, value: string) {
+    if (rows[r]?.[c] === value) return;
+    const next = rows.map((row, i) =>
+      i === r ? row.map((cell, j) => (j === c ? value : cell)) : row,
+    );
+    commit(next);
+  }
+
+  function addRow() {
+    const cols = Math.max(1, rows[0]?.length ?? 1);
+    commit([...rows, Array.from({ length: cols }, () => "")]);
+  }
+
+  function deleteRow(r: number) {
+    if (rows.length <= 1 || r === 0) return; // keep header
+    commit(rows.filter((_, i) => i !== r));
+  }
 
   const [header, ...body] = rows;
 
   return (
     <div className="h-full overflow-auto p-6">
       <table className="w-full border-collapse text-sm">
-        {header && (
-          <thead>
-            <tr>
-              {header.map((cell, i) => (
-                <th
-                  key={i}
-                  className="sticky top-0 border-b bg-sidebar px-3 py-2 text-left font-semibold"
-                >
-                  {cell}
-                </th>
-              ))}
-            </tr>
-          </thead>
-        )}
+        <thead>
+          <tr>
+            {header?.map((cell, c) => (
+              <th
+                key={c}
+                className="sticky top-0 border-b bg-sidebar text-left"
+              >
+                <Cell
+                  value={cell}
+                  readOnly={readOnly}
+                  isHeader
+                  onCommit={(v) => updateCell(0, c, v)}
+                />
+              </th>
+            ))}
+            {!readOnly && <th className="w-9 border-b bg-sidebar" />}
+          </tr>
+        </thead>
         <tbody>
-          {body.map((cells, r) => (
-            <tr key={r} className="hover:bg-accent/50">
-              {cells.map((cell, c) => (
-                <td key={c} className="border-b px-3 py-1.5 text-muted-foreground">
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {body.map((row, i) => {
+            const r = i + 1;
+            return (
+              <tr key={r} className="group">
+                {row.map((cell, c) => (
+                  <td key={c} className="border-b">
+                    <Cell
+                      value={cell}
+                      readOnly={readOnly}
+                      onCommit={(v) => updateCell(r, c, v)}
+                    />
+                  </td>
+                ))}
+                {!readOnly && (
+                  <td className="w-9 border-b text-center align-middle">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7 text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+                      onClick={() => deleteRow(r)}
+                      aria-label={`Delete row ${r}`}
+                    >
+                      <X className="size-3.5" />
+                    </Button>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+
+      {!readOnly && (
+        <div className="mt-4">
+          <Button variant="outline" size="sm" onClick={addRow}>
+            <Plus className="mr-1 size-3.5" />
+            Add row
+          </Button>
+        </div>
+      )}
     </div>
+  );
+}
+
+function Cell({
+  value,
+  readOnly,
+  isHeader,
+  onCommit,
+}: {
+  value: string;
+  readOnly: boolean;
+  isHeader?: boolean;
+  onCommit: (value: string) => void;
+}) {
+  // Uncontrolled input; key remounts when external value changes so the
+  // defaultValue stays in sync without setState-in-effect.
+  return (
+    <input
+      key={value}
+      defaultValue={value}
+      readOnly={readOnly}
+      onBlur={(e) => onCommit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+      className={cn(
+        "w-full bg-transparent px-3 py-1.5 outline-none focus:bg-accent",
+        isHeader ? "font-semibold" : "text-muted-foreground focus:text-foreground",
+        readOnly && "cursor-default",
+      )}
+    />
   );
 }
