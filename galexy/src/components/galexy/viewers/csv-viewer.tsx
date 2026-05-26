@@ -1,68 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Replace, Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { parseCsv, serializeCsv } from "@/lib/csv";
 import type { Note } from "@/lib/mock-notes";
 
-// --- CSV parse / serialize --------------------------------------------------
-
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-
-  const pushRow = () => {
-    row.push(field);
-    field = "";
-    if (row.length > 1 || row[0] !== "") rows.push(row);
-    row = [];
-  };
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    if (inQuotes) {
-      if (char === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += char;
-      }
-    } else if (char === '"') {
-      inQuotes = true;
-    } else if (char === ",") {
-      row.push(field);
-      field = "";
-    } else if (char === "\n" || char === "\r") {
-      if (char === "\r" && text[i + 1] === "\n") i++;
-      pushRow();
-    } else {
-      field += char;
-    }
-  }
-  if (field !== "" || row.length > 0) pushRow();
-  return rows;
-}
-
-function escapeCell(value: string): string {
-  if (/[",\n\r]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
-}
-
-function serializeCsv(rows: string[][]): string {
-  return rows.map((row) => row.map(escapeCell).join(",")).join("\n") + "\n";
-}
-
-// --- Component --------------------------------------------------------------
+type OverlayMode = "closed" | "find" | "replace";
 
 type CsvViewerProps = {
   item: Note;
@@ -70,131 +17,164 @@ type CsvViewerProps = {
 };
 
 export function CsvViewer({ item, onChange }: CsvViewerProps) {
-  const readOnly = !onChange;
+  const rows = useMemo(() => parseCsv(item.content), [item.content]);
+  const [mode, setMode] = useState<OverlayMode>("closed");
+  const [findQuery, setFindQuery] = useState("");
+  const [replaceQuery, setReplaceQuery] = useState("");
 
-  const [rows, setRows] = useState<string[][]>(() => {
-    const parsed = parseCsv(item.content);
-    return parsed.length > 0 ? parsed : [[""]];
-  });
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setMode("find");
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        setMode("replace");
+      } else if (e.key === "Escape") {
+        setMode("closed");
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-  function commit(next: string[][]) {
-    setRows(next);
-    onChange?.(serializeCsv(next));
-  }
+  const matchCount = useMemo(() => {
+    if (!findQuery) return 0;
+    const needle = findQuery.toLowerCase();
+    let count = 0;
+    for (const row of rows) {
+      for (const cell of row) {
+        if (cell.toLowerCase().includes(needle)) count++;
+      }
+    }
+    return count;
+  }, [rows, findQuery]);
 
-  function updateCell(r: number, c: number, value: string) {
-    if (rows[r]?.[c] === value) return;
-    const next = rows.map((row, i) =>
-      i === r ? row.map((cell, j) => (j === c ? value : cell)) : row,
+  const isMatch = (value: string) =>
+    findQuery.length > 0 &&
+    value.toLowerCase().includes(findQuery.toLowerCase());
+
+  function replaceAll() {
+    if (!findQuery || !onChange) return;
+    const next = rows.map((row) =>
+      row.map((cell) => cell.split(findQuery).join(replaceQuery)),
     );
-    commit(next);
-  }
-
-  function addRow() {
-    const cols = Math.max(1, rows[0]?.length ?? 1);
-    commit([...rows, Array.from({ length: cols }, () => "")]);
-  }
-
-  function deleteRow(r: number) {
-    if (rows.length <= 1 || r === 0) return; // keep header
-    commit(rows.filter((_, i) => i !== r));
+    onChange(serializeCsv(next));
   }
 
   const [header, ...body] = rows;
 
   return (
-    <div className="h-full overflow-auto p-6">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr>
-            {header?.map((cell, c) => (
-              <th
-                key={c}
-                className="sticky top-0 border-b bg-sidebar text-left"
-              >
-                <Cell
-                  value={cell}
-                  readOnly={readOnly}
-                  isHeader
-                  onCommit={(v) => updateCell(0, c, v)}
-                />
-              </th>
-            ))}
-            {!readOnly && <th className="w-9 border-b bg-sidebar" />}
-          </tr>
-        </thead>
-        <tbody>
-          {body.map((row, i) => {
-            const r = i + 1;
-            return (
-              <tr key={r} className="group">
-                {row.map((cell, c) => (
-                  <td key={c} className="border-b">
-                    <Cell
-                      value={cell}
-                      readOnly={readOnly}
-                      onCommit={(v) => updateCell(r, c, v)}
-                    />
-                  </td>
-                ))}
-                {!readOnly && (
-                  <td className="w-9 border-b text-center align-middle">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
-                      onClick={() => deleteRow(r)}
-                      aria-label={`Delete row ${r}`}
-                    >
-                      <X className="size-3.5" />
-                    </Button>
-                  </td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="relative flex h-full flex-col bg-background">
+      {/* Toolbar */}
+      <div className="flex shrink-0 items-center gap-2 border-b px-6 py-2">
+        <Button
+          variant={mode === "find" ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => setMode("find")}
+        >
+          <Search className="mr-1.5 size-3.5" />
+          Find
+          <kbd className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px]">⌘F</kbd>
+        </Button>
+        <Button
+          variant={mode === "replace" ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => setMode("replace")}
+        >
+          <Replace className="mr-1.5 size-3.5" />
+          Replace
+          <kbd className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px]">⌘H</kbd>
+        </Button>
+        <span className="ml-auto text-xs text-muted-foreground">
+          {rows.length} {rows.length === 1 ? "row" : "rows"} · read-only
+        </span>
+      </div>
 
-      {!readOnly && (
-        <div className="mt-4">
-          <Button variant="outline" size="sm" onClick={addRow}>
-            <Plus className="mr-1 size-3.5" />
-            Add row
-          </Button>
+      {/* Table */}
+      <div className="min-h-0 flex-1 overflow-auto px-6 py-4">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Empty file.</p>
+        ) : (
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr>
+                {header?.map((cell, c) => (
+                  <th
+                    key={c}
+                    className={cn(
+                      "sticky top-0 border-b bg-sidebar px-3 py-2 text-left font-semibold",
+                      isMatch(cell) && "bg-yellow-500/30 text-foreground",
+                    )}
+                  >
+                    {cell}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {body.map((row, r) => (
+                <tr key={r} className="hover:bg-accent/40">
+                  {row.map((cell, c) => (
+                    <td
+                      key={c}
+                      className={cn(
+                        "border-b px-3 py-1.5 text-muted-foreground",
+                        isMatch(cell) && "bg-yellow-500/30 text-foreground",
+                      )}
+                    >
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Overlay */}
+      {mode !== "closed" && (
+        <div className="absolute top-14 right-6 z-20 flex w-72 flex-col gap-2 rounded-md border bg-popover p-3 text-popover-foreground shadow-md">
+          <div className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            {mode === "find" ? "Find" : "Find & Replace"}
+            <span className="ml-auto font-normal">
+              {matchCount} {matchCount === 1 ? "match" : "matches"}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              onClick={() => setMode("closed")}
+              aria-label="Close"
+            >
+              <X className="size-3.5" />
+            </Button>
+          </div>
+          <Input
+            autoFocus
+            value={findQuery}
+            onChange={(e) => setFindQuery(e.target.value)}
+            placeholder="Find…"
+          />
+          {mode === "replace" && (
+            <>
+              <Input
+                value={replaceQuery}
+                onChange={(e) => setReplaceQuery(e.target.value)}
+                placeholder="Replace with…"
+              />
+              <Button
+                size="sm"
+                onClick={replaceAll}
+                disabled={!onChange || !findQuery}
+              >
+                Replace all
+              </Button>
+            </>
+          )}
         </div>
       )}
     </div>
-  );
-}
-
-function Cell({
-  value,
-  readOnly,
-  isHeader,
-  onCommit,
-}: {
-  value: string;
-  readOnly: boolean;
-  isHeader?: boolean;
-  onCommit: (value: string) => void;
-}) {
-  // Uncontrolled input; key remounts when external value changes so the
-  // defaultValue stays in sync without setState-in-effect.
-  return (
-    <input
-      key={value}
-      defaultValue={value}
-      readOnly={readOnly}
-      onBlur={(e) => onCommit(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-      }}
-      className={cn(
-        "w-full bg-transparent px-3 py-1.5 outline-none focus:bg-accent",
-        isHeader ? "font-semibold" : "text-muted-foreground focus:text-foreground",
-        readOnly && "cursor-default",
-      )}
-    />
   );
 }

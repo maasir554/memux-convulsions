@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { FileText, Pencil, BookOpen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,12 @@ import { ImageViewer } from "@/components/galexy/viewers/image-viewer";
 import { CsvViewer } from "@/components/galexy/viewers/csv-viewer";
 import { CodeView } from "@/components/galexy/viewers/code-view";
 import { toggleTaskInContent, type Note } from "@/lib/mock-notes";
+
+// Heavy spreadsheet UI: lazy and client-only.
+const CsvSpreadsheet = dynamic(
+  () => import("@/components/galexy/viewers/csv-spreadsheet"),
+  { ssr: false },
+);
 
 type EditorMode = "read" | "edit";
 
@@ -57,7 +64,7 @@ export function EditorPane({
           onClose={onClose}
         />
 
-        {activeNote?.type === "markdown" && (
+        {(activeNote?.type === "markdown" || activeNote?.type === "csv") && (
           <div className="flex shrink-0 items-center border-l px-1">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -162,7 +169,15 @@ function Body({
       );
 
     case "csv":
-      return (
+      return mode === "edit" ? (
+        <div className="min-h-0 flex-1">
+          <CsvSpreadsheet
+            key={item.id}
+            content={item.content}
+            onChange={(content) => onChange(item.id, content)}
+          />
+        </div>
+      ) : (
         <div className="min-h-0 flex-1">
           <CsvViewer
             key={item.id}
