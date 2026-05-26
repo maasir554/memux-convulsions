@@ -5,9 +5,7 @@ import {
   createUniver,
   defaultTheme,
   LocaleType,
-  type FUniver,
   type IWorkbookData,
-  type Univer,
 } from "@univerjs/presets";
 import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
 import UniverPresetSheetsCoreEnUS from "@univerjs/preset-sheets-core/locales/en-US";
@@ -85,11 +83,20 @@ function workbookToCsv(snapshot: IWorkbookData): string {
     }
     rows.push(row);
   }
-  // Trim trailing empty rows.
   while (rows.length > 0 && rows[rows.length - 1].every((c) => c === "")) {
     rows.pop();
   }
   return rows.length === 0 ? "" : serializeCsv(rows);
+}
+
+// A no-op worker script for Univer's RPC plugin. Without one, the plugin
+// can't construct a Worker and the init can hang or throw. Formulas relying
+// on the worker won't evaluate remotely — main-thread features work fine.
+function noopWorkerUrl(): string {
+  const blob = new Blob(["self.onmessage = () => {};"], {
+    type: "application/javascript",
+  });
+  return URL.createObjectURL(blob);
 }
 
 type CsvSpreadsheetProps = {
@@ -101,69 +108,104 @@ export default function CsvSpreadsheet({
   content,
   onChange,
 }: CsvSpreadsheetProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const apiRef = useRef<{ univer: Univer; api: FUniver } | null>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Keep the latest onChange in a ref so the create-effect doesn't have to
-  // re-run when the parent passes a new callback identity.
+  const hostRef = useRef<HTMLDivElement>(null);
+
+  // Latest onChange via ref so the create-effect stays mount-only.
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
   });
 
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    const host = hostRef.current;
+    if (!host) return;
 
-    const { univer, univerAPI } = createUniver({
-      locale: LocaleType.EN_US,
-      locales: { [LocaleType.EN_US]: UniverPresetSheetsCoreEnUS },
-      theme: defaultTheme,
-      darkMode: isDarkMode(),
-      presets: [
-        UniverSheetsCorePreset({
-          container,
-          customFontFamily: [
-            { value: "Geist", label: "Geist", category: "sans-serif" },
-          ],
-        }),
-      ],
+    // Each effect run gets its own inner container. React Strict Mode (dev)
+    // double-mounts effects; pairing an inner-div with the instance lets us
+    // dispose the old one without touching whatever's already mounted next.
+    const inner = document.createElement("div");
+    inner.style.cssText =
+      "position:relative;height:100%;width:100%;overflow:hidden";
+    host.appendChild(inner);
+
+    let cancelled = false;
+    let cleanupHandlers: Array<() => void> = [];
+    const workerURL = noopWorkerUrl();
+
+    // Defer creation to a microtask so any in-flight React render completes.
+    Promise.resolve().then(() => {
+      if (cancelled) {
+        if (host.contains(inner)) host.removeChild(inner);
+        URL.revokeObjectURL(workerURL);
+        return;
+      }
+
+      const { univer, univerAPI } = createUniver({
+        locale: LocaleType.EN_US,
+        locales: { [LocaleType.EN_US]: UniverPresetSheetsCoreEnUS },
+        theme: defaultTheme,
+        darkMode: isDarkMode(),
+        presets: [
+          UniverSheetsCorePreset({
+            container: inner,
+            workerURL,
+            customFontFamily: [
+              { value: "Geist", label: "Geist", category: "sans-serif" },
+            ],
+          }),
+        ],
+      });
+
+      univerAPI.createWorkbook(csvToWorkbookSnapshot(content));
+
+      const valueChangedDisposer = univerAPI.addEvent(
+        univerAPI.Event.SheetValueChanged,
+        () => {
+          if (saveTimer) clearTimeout(saveTimer);
+          saveTimer = setTimeout(() => {
+            const wb = univerAPI.getActiveWorkbook();
+            if (!wb) return;
+            onChangeRef.current(workbookToCsv(wb.save()));
+          }, 300);
+        },
+      );
+
+      const themeObserver = new MutationObserver(() => {
+        univerAPI.toggleDarkMode(isDarkMode());
+      });
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+
+      cleanupHandlers = [
+        () => themeObserver.disconnect(),
+        () => valueChangedDisposer.dispose(),
+        () => univer.dispose(),
+      ];
     });
 
-    apiRef.current = { univer, api: univerAPI };
-
-    univerAPI.createWorkbook(csvToWorkbookSnapshot(content));
-
-    const disposer = univerAPI.addEvent(
-      univerAPI.Event.SheetValueChanged,
-      () => {
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => {
-          const wb = univerAPI.getActiveWorkbook();
-          if (!wb) return;
-          onChangeRef.current(workbookToCsv(wb.save()));
-        }, 300);
-      },
-    );
-
-    // Sync dark/light when the app theme changes.
-    const themeObserver = new MutationObserver(() => {
-      univerAPI.toggleDarkMode(isDarkMode());
-    });
-    themeObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
     return () => {
-      themeObserver.disconnect();
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      disposer.dispose();
-      univer.dispose();
-      apiRef.current = null;
+      cancelled = true;
+      if (saveTimer) clearTimeout(saveTimer);
+      // Defer dispose so it doesn't run synchronously inside React's commit
+      // (React 19 errors when a foreign root is unmounted mid-render).
+      setTimeout(() => {
+        for (const handler of cleanupHandlers) {
+          try {
+            handler();
+          } catch {
+            // best-effort teardown
+          }
+        }
+        if (host.contains(inner)) host.removeChild(inner);
+        URL.revokeObjectURL(workerURL);
+      }, 0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // mount-only; the workbook owns its own state thereafter
+  }, []);
 
-  return <div ref={containerRef} className="galexy-spreadsheet" />;
+  return <div ref={hostRef} className="galexy-spreadsheet" />;
 }
