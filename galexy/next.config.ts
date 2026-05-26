@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+  // Univer owns its own React root; dev Strict Mode's double-mount makes the
+  // heavy initialisation run twice and races the unmount, freezing the page.
+  // Single-mount in dev avoids that without affecting production behaviour.
+  reactStrictMode: false,
 };
 
 export default nextConfig;

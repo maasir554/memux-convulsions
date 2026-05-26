@@ -89,16 +89,6 @@ function workbookToCsv(snapshot: IWorkbookData): string {
   return rows.length === 0 ? "" : serializeCsv(rows);
 }
 
-// A no-op worker script for Univer's RPC plugin. Without one, the plugin
-// can't construct a Worker and the init can hang or throw. Formulas relying
-// on the worker won't evaluate remotely — main-thread features work fine.
-function noopWorkerUrl(): string {
-  const blob = new Blob(["self.onmessage = () => {};"], {
-    type: "application/javascript",
-  });
-  return URL.createObjectURL(blob);
-}
-
 type CsvSpreadsheetProps = {
   content: string;
   onChange: (content: string) => void;
@@ -120,9 +110,6 @@ export default function CsvSpreadsheet({
     const host = hostRef.current;
     if (!host) return;
 
-    // Each effect run gets its own inner container. React Strict Mode (dev)
-    // double-mounts effects; pairing an inner-div with the instance lets us
-    // dispose the old one without touching whatever's already mounted next.
     const inner = document.createElement("div");
     inner.style.cssText =
       "position:relative;height:100%;width:100%;overflow:hidden";
@@ -130,13 +117,11 @@ export default function CsvSpreadsheet({
 
     let cancelled = false;
     let cleanupHandlers: Array<() => void> = [];
-    const workerURL = noopWorkerUrl();
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Defer creation to a microtask so any in-flight React render completes.
     Promise.resolve().then(() => {
       if (cancelled) {
         if (host.contains(inner)) host.removeChild(inner);
-        URL.revokeObjectURL(workerURL);
         return;
       }
 
@@ -148,7 +133,10 @@ export default function CsvSpreadsheet({
         presets: [
           UniverSheetsCorePreset({
             container: inner,
-            workerURL,
+            // Intentionally omit workerURL — without a real worker entry the
+            // RPC plugin would spin trying to talk to nothing. Formulas that
+            // would have run in a worker won't compute; main-thread features
+            // (editing, formatting, drag, copy/paste) are unaffected.
             customFontFamily: [
               { value: "Geist", label: "Geist", category: "sans-serif" },
             ],
@@ -170,8 +158,17 @@ export default function CsvSpreadsheet({
         },
       );
 
+      // De-duped theme sync: only react when the app's dark/light *actually*
+      // flips. Univer itself manipulates class names on elements (including
+      // possibly documentElement); without this guard the observer would
+      // call toggleDarkMode → Univer mutates the DOM → observer fires →
+      // infinite loop → freeze.
+      let lastDark = isDarkMode();
       const themeObserver = new MutationObserver(() => {
-        univerAPI.toggleDarkMode(isDarkMode());
+        const next = isDarkMode();
+        if (next === lastDark) return;
+        lastDark = next;
+        univerAPI.toggleDarkMode(next);
       });
       themeObserver.observe(document.documentElement, {
         attributes: true,
@@ -185,13 +182,11 @@ export default function CsvSpreadsheet({
       ];
     });
 
-    let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
     return () => {
       cancelled = true;
       if (saveTimer) clearTimeout(saveTimer);
-      // Defer dispose so it doesn't run synchronously inside React's commit
-      // (React 19 errors when a foreign root is unmounted mid-render).
+      // Defer to avoid synchronously unmounting Univer's React root inside
+      // the parent's commit (React 19 errors otherwise).
       setTimeout(() => {
         for (const handler of cleanupHandlers) {
           try {
@@ -201,7 +196,6 @@ export default function CsvSpreadsheet({
           }
         }
         if (host.contains(inner)) host.removeChild(inner);
-        URL.revokeObjectURL(workerURL);
       }, 0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
