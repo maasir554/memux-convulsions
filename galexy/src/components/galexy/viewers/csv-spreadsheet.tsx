@@ -2,10 +2,23 @@
 
 import { useMemo, useRef } from "react";
 import { Workbook } from "@fortune-sheet/react";
-import type { Cell, CellWithRowAndCol, Sheet } from "@fortune-sheet/core";
+import type {
+  Cell,
+  CellWithRowAndCol,
+  Sheet,
+  Settings,
+} from "@fortune-sheet/core";
 import "@fortune-sheet/react/dist/index.css";
 
 import { parseCsv, serializeCsv } from "@/lib/csv";
+
+// fortune-sheet inherits luckysheet's CJK font defaults which render as serif
+// on macOS — force a clean sans-serif everywhere we can reach.
+const SANS = "Inter, Arial, Helvetica, sans-serif";
+
+function setCanvasFont(ctx: CanvasRenderingContext2D, size = 11) {
+  ctx.font = `${size}px ${SANS}`;
+}
 
 function csvToWorkbook(csv: string): Sheet[] {
   const rows = parseCsv(csv);
@@ -18,6 +31,7 @@ function csvToWorkbook(csv: string): Sheet[] {
           v: value,
           m: value,
           ct: { fa: "General", t: "g" },
+          ff: SANS,
         };
         celldata.push({ r, c, v: cell });
       }
@@ -36,20 +50,16 @@ function workbookToCsv(sheets: Sheet[]): string {
       if (!cell) {
         out.push("");
       } else {
-        // `m` holds the displayed/formatted value (after formula eval);
-        // fall back to raw `v`.
         const display = cell.m ?? cell.v ?? "";
         out.push(String(display));
       }
     }
     rows.push(out);
   }
-  // Trim trailing all-empty rows.
   while (rows.length > 0 && rows[rows.length - 1].every((c) => c === "")) {
     rows.pop();
   }
   if (rows.length === 0) return "";
-  // Trim trailing all-empty columns.
   let lastCol = 0;
   for (const r of rows) {
     for (let c = r.length - 1; c >= 0; c--) {
@@ -62,6 +72,21 @@ function workbookToCsv(sheets: Sheet[]): string {
   return serializeCsv(rows.map((r) => r.slice(0, lastCol + 1)));
 }
 
+const canvasFontHooks: Settings["hooks"] = {
+  beforeRenderCell: (_cell, _info, ctx) => {
+    setCanvasFont(ctx);
+    return false;
+  },
+  beforeRenderColumnHeaderCell: (_char, _idx, _l, _w, _h, ctx) => {
+    setCanvasFont(ctx);
+    return false;
+  },
+  beforeRenderRowHeaderCell: (_row, _idx, _t, _w, _h, ctx) => {
+    setCanvasFont(ctx);
+    return false;
+  },
+};
+
 type CsvSpreadsheetProps = {
   content: string;
   onChange: (content: string) => void;
@@ -71,9 +96,6 @@ export default function CsvSpreadsheet({
   content,
   onChange,
 }: CsvSpreadsheetProps) {
-  // Compute initial data once — re-initing would lose selection/scroll. The
-  // component is keyed by item.id at the call site, so opening a different
-  // CSV remounts cleanly.
   const initialData = useMemo(
     () => csvToWorkbook(content),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -90,8 +112,13 @@ export default function CsvSpreadsheet({
   }
 
   return (
-    <div className="h-full w-full overflow-hidden bg-white text-foreground">
-      <Workbook data={initialData} onChange={handleChange} />
+    <div className="galexy-spreadsheet h-full w-full overflow-hidden bg-background">
+      <Workbook
+        data={initialData}
+        onChange={handleChange}
+        hooks={canvasFontHooks}
+        showSheetTabs={false}
+      />
     </div>
   );
 }

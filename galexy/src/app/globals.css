@@ -130,6 +130,120 @@
   }
 }
 
+/* --- fortune-sheet (CSV spreadsheet) theme overrides ---------------------- */
+/* Scoped to .galexy-spreadsheet; uses the app's theme variables so dark/light
+   adapt automatically. The canvas content stays light (fortune-sheet renders
+   cells on a canvas it controls); only the surrounding chrome is themed. */
+.galexy-spreadsheet,
+.galexy-spreadsheet * {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, "Segoe UI",
+    Roboto, sans-serif !important;
+}
+.galexy-spreadsheet .fortune-container {
+  background: var(--background);
+  color: var(--foreground);
+}
+/* Toolbar */
+.galexy-spreadsheet .fortune-toolbar {
+  background: var(--sidebar);
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+}
+.galexy-spreadsheet .fortune-toolbar-button,
+.galexy-spreadsheet .fortune-toolbar-combo-button,
+.galexy-spreadsheet .fortune-toolbar-combo-text,
+.galexy-spreadsheet .fortune-toolbar-subtext,
+.galexy-spreadsheet .fortune-toolbar-select {
+  color: var(--foreground);
+}
+.galexy-spreadsheet .fortune-toolbar-button:hover,
+.galexy-spreadsheet .fortune-toolbar-combo-button:hover,
+.galexy-spreadsheet .fortune-toolbar-more-container:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+  border-radius: var(--radius-sm);
+}
+.galexy-spreadsheet .fortune-toolbar-divider,
+.galexy-spreadsheet .fortune-toolbar-menu-divider,
+.galexy-spreadsheet .fortune-toolbar-menu-line {
+  background: var(--border);
+}
+/* Name box + formula bar */
+.galexy-spreadsheet .fortune-name-box-container,
+.galexy-spreadsheet .fortune-fx-input-container {
+  background: var(--sidebar);
+  border-color: var(--border) !important;
+  color: var(--foreground);
+}
+.galexy-spreadsheet .fortune-name-box,
+.galexy-spreadsheet .fortune-fx-input,
+.galexy-spreadsheet .fortune-fx-editor {
+  background: var(--background);
+  color: var(--foreground);
+  border-color: var(--border) !important;
+}
+.galexy-spreadsheet .fortune-fx-icon {
+  color: var(--muted-foreground);
+}
+/* Sheet tabs & zoom */
+.galexy-spreadsheet .fortune-sheet-area,
+.galexy-spreadsheet .fortune-sheet-area-right {
+  background: var(--sidebar);
+  border-top: 1px solid var(--border);
+  color: var(--foreground);
+}
+.galexy-spreadsheet .fortune-sheet-list-item {
+  background: transparent;
+  color: var(--muted-foreground);
+  border-color: var(--border);
+}
+.galexy-spreadsheet .fortune-sheet-list-item:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.galexy-spreadsheet .fortune-sheet-list-item-name {
+  color: inherit;
+}
+.galexy-spreadsheet .fortune-zoom-container {
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.galexy-spreadsheet .fortune-zoom-button:hover,
+.galexy-spreadsheet .fortune-zoom-ratio-text:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.galexy-spreadsheet .fortune-zoom-ratio-current,
+.galexy-spreadsheet .fortune-zoom-ratio-text {
+  color: var(--foreground);
+}
+/* Popovers / menus */
+.galexy-spreadsheet .fortune-context-menu,
+.galexy-spreadsheet .fortune-toolbar-combo-popup,
+.galexy-spreadsheet .fortune-toolbar-color-picker,
+.galexy-spreadsheet .fortune-zoom-ratio-menu,
+.galexy-spreadsheet .fortune-dialog,
+.galexy-spreadsheet .fortune-modal-container,
+.galexy-spreadsheet .fortune-filter-menu {
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+}
+.galexy-spreadsheet .fortune-context-menu .fortune-menuitem-row:hover,
+.galexy-spreadsheet .fortune-toolbar-select-option:hover,
+.galexy-spreadsheet .fortune-zoom-ratio-item:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.galexy-spreadsheet .fortune-context-menu-divider {
+  background: var(--border);
+}
+/* Cell input (inline editor that appears when typing) */
+.galexy-spreadsheet .luckysheet-cell-input {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif !important;
+  color: #1a1a1a;
+}
+
 /* Hide scrollbars while keeping scroll behavior (e.g. the editor tab strip). */
 .no-scrollbar {
   scrollbar-width: none;
