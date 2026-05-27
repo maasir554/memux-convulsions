@@ -9,6 +9,7 @@ import type {
   GraphLink,
   GraphNode,
 } from "@/components/galexy/force-graph-canvas";
+import { TIER_Y } from "@/components/galexy/graph-tiers";
 
 const ForceGraphCanvas = dynamic(
   () => import("@/components/galexy/force-graph-canvas"),
@@ -25,7 +26,11 @@ const FALLBACK: GraphColors = {
   user: "#ff9f1c",
   workspace: "#a78bfa",
   active: "#ff6ac1",
+  activeText: "#74c0fc",
   link: "#3b3f51",
+  linkInbound: "#ff6ac1",
+  linkOutbound: "#5cf08a",
+  linkMutual: "#60a5fa",
   contains: "#ffd43b",
   tree: "#6c7693",
   text: "#c8ccd4",
@@ -46,7 +51,11 @@ function readColors(): GraphColors {
     user: get("--graph-user", FALLBACK.user),
     workspace: get("--graph-workspace", FALLBACK.workspace),
     active: get("--graph-active", FALLBACK.active),
+    activeText: get("--graph-active-text", FALLBACK.activeText),
     link: get("--graph-link", FALLBACK.link),
+    linkInbound: get("--graph-link-inbound", FALLBACK.linkInbound),
+    linkOutbound: get("--graph-link-outbound", FALLBACK.linkOutbound),
+    linkMutual: get("--graph-link-mutual", FALLBACK.linkMutual),
     contains: get("--graph-contains", FALLBACK.contains),
     tree: get("--graph-tree", FALLBACK.tree),
     text: get("--graph-text", FALLBACK.text),
@@ -118,6 +127,9 @@ export function GraphView({
   const graphData = useMemo<{ nodes: GraphNode[]; links: GraphLink[] }>(
     () => {
       // File + folder nodes — the existing graph layer.
+      // Folders get fy pinned to their tier line so every folder sits at the
+      // exact same y. Files stay free vertically so they can drift a few
+      // pixels to avoid label collisions.
       const baseNodes: GraphNode[] = items.map((item) => ({
         id: item.id,
         name: item.title,
@@ -126,6 +138,7 @@ export function GraphView({
           item.type === "folder"
             ? Math.max(1, item.childIds?.length ?? 1)
             : 1 + (backlinkCount[item.id] ?? 0),
+        ...(item.type === "folder" ? { fy: TIER_Y.folder } : {}),
       }));
       const baseLinks: GraphLink[] = edges.map((e) => ({
         source: e.source,
@@ -141,7 +154,7 @@ export function GraphView({
           type: "user",
           val: 4,
           fx: 0,
-          fy: -340,
+          fy: TIER_Y.user,
         },
         {
           id: WORKSPACE_ID,
@@ -149,7 +162,7 @@ export function GraphView({
           type: "workspace",
           val: 4,
           fx: 0,
-          fy: -200,
+          fy: TIER_Y.workspace,
         },
       ];
 

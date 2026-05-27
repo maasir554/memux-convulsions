@@ -1,4 +1,11 @@
-import { jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import type { PdfAnnotation, SheetMeta } from "@/lib/mock-notes";
 
@@ -71,3 +78,229 @@ export const ITEMS_MIGRATIONS: readonly string[] = [
   `ALTER TABLE items ADD COLUMN IF NOT EXISTS sheet_meta jsonb;`,
   `ALTER TABLE items ADD COLUMN IF NOT EXISTS pdf_annotations jsonb;`,
 ];
+
+// ===========================================================================
+// Indexer schema — runs, sections, vectors, concepts.
+// pgvector is enabled at boot (see vault-db.ts). Embedding dim = 1536,
+// matryoshka-truncated from gemini-embedding-001's native 3072 and manually
+// L2-normalised on the way in.
+// ===========================================================================
+
+export type RunStatus =
+  | "draft"
+  | "queued"
+  | "preparing"
+  | "walking"
+  | "sectioning"
+  | "summarising"
+  | "embedding"
+  | "naming"
+  | "finalising"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export type SectionTransition = "continue" | "end" | "new";
+
+export type IndexerFileRef = {
+  /** Stable id used to address the file inside the run; not the items.id. */
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  /** OPFS blob_key once the file has been uploaded to OPFS. Null while still in draft (browser File). */
+  blobKey?: string | null;
+};
+
+export const indexRuns = pgTable("index_runs", {
+  id: text("id").primaryKey(),
+  /** Position in the queue (lower = earlier). Set to NULL once status moves past `queued`. */
+  queuePosition: integer("queue_position"),
+  status: text("status").$type<RunStatus>().notNull().default("draft"),
+  /** User-supplied (empty → Namer fills it on completion). */
+  groupName: text("group_name").notNull().default(""),
+  /** User-supplied context prompt. */
+  prompt: text("prompt").notNull().default(""),
+  /** Files attached to this group. */
+  files: jsonb("files").$type<IndexerFileRef[]>().notNull().default([]),
+  /** Live agent notepad. Markdown. */
+  scratchpadMd: text("scratchpad_md").notNull().default(""),
+  /** The _Indexes/<group>/ folder name once materialised. */
+  folderName: text("folder_name"),
+  error: text("error"),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  startedAt: timestamp("started_at", { mode: "date" }),
+  finishedAt: timestamp("finished_at", { mode: "date" }),
+});
+
+export type DbIndexRun = typeof indexRuns.$inferSelect;
+export type NewDbIndexRun = typeof indexRuns.$inferInsert;
+
+export const INDEX_RUNS_CREATE = `
+CREATE TABLE IF NOT EXISTS index_runs (
+  id text PRIMARY KEY,
+  queue_position integer,
+  status text NOT NULL DEFAULT 'draft',
+  group_name text NOT NULL DEFAULT '',
+  auto_name text NOT NULL DEFAULT 'false',
+  prompt text NOT NULL DEFAULT '',
+  files jsonb NOT NULL DEFAULT '[]'::jsonb,
+  scratchpad_md text NOT NULL DEFAULT '',
+  folder_name text,
+  error text,
+  created_at timestamp NOT NULL DEFAULT now(),
+  started_at timestamp,
+  finished_at timestamp
+);
+`;
+
+/** Per-file progress inside a run. One row per file the run is responsible for. */
+export const indexTargets = pgTable("index_targets", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  fileRefId: text("file_ref_id").notNull(),
+  status: text("status").$type<RunStatus | "pending">().notNull().default("pending"),
+  totalSections: integer("total_sections").notNull().default(0),
+  doneSections: integer("done_sections").notNull().default(0),
+  error: text("error"),
+});
+
+export const INDEX_TARGETS_CREATE = `
+CREATE TABLE IF NOT EXISTS index_targets (
+  id text PRIMARY KEY,
+  run_id text NOT NULL,
+  file_ref_id text NOT NULL,
+  status text NOT NULL DEFAULT 'pending',
+  total_sections integer NOT NULL DEFAULT 0,
+  done_sections integer NOT NULL DEFAULT 0,
+  error text
+);
+CREATE INDEX IF NOT EXISTS index_targets_run_id ON index_targets (run_id);
+`;
+
+/**
+ * One row per discrete chunk of source content: PDF page, markdown heading
+ * section, CSV table, image. Carries the polished summary + extracted
+ * concepts + questions. The actual md materialised into _Indexes/<Group>/
+ * lives in items as usual; this row points to it via item_id.
+ */
+export const sections = pgTable("sections", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  /** The source file the section came from (the items.id of the uploaded source). */
+  sourceItemId: text("source_item_id").notNull(),
+  /** The materialised section markdown row in items (Section NN · topic.md). Null until written. */
+  noteItemId: text("note_item_id"),
+  ordinal: integer("ordinal").notNull(),
+  kind: text("kind", {
+    enum: ["pdf-page", "md-heading", "csv-table", "image", "code-symbol"],
+  }).notNull(),
+  /** Topic label the Visioner assigned. */
+  topic: text("topic").notNull().default(""),
+  /** Cache key — re-running with the same hash short-circuits to existing summary/concepts. */
+  contentHash: text("content_hash").notNull().default(""),
+  contentText: text("content_text").notNull().default(""),
+  summary: text("summary").notNull().default(""),
+  questions: jsonb("questions").$type<string[]>().notNull().default([]),
+  concepts: jsonb("concepts").$type<string[]>().notNull().default([]),
+  /** Diagrams cropped from the source: [{ blobKey, caption, alt, bbox }]. */
+  images: jsonb("images")
+    .$type<Array<{ blobKey: string; caption: string; alt: string; bbox?: [number, number, number, number] }>>()
+    .notNull()
+    .default([]),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+});
+
+export const SECTIONS_CREATE = `
+CREATE TABLE IF NOT EXISTS sections (
+  id text PRIMARY KEY,
+  run_id text NOT NULL,
+  source_item_id text NOT NULL,
+  note_item_id text,
+  ordinal integer NOT NULL,
+  kind text NOT NULL,
+  topic text NOT NULL DEFAULT '',
+  content_hash text NOT NULL DEFAULT '',
+  content_text text NOT NULL DEFAULT '',
+  summary text NOT NULL DEFAULT '',
+  questions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  concepts jsonb NOT NULL DEFAULT '[]'::jsonb,
+  images jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sections_run_id ON sections (run_id);
+CREATE INDEX IF NOT EXISTS sections_source_item ON sections (source_item_id);
+CREATE INDEX IF NOT EXISTS sections_content_hash ON sections (content_hash);
+`;
+
+/**
+ * Embeddings live in their own table — three flavours per section (summary,
+ * each question, each concept). pgvector handles ANN. drizzle has no first-
+ * class `vector` column, so we declare it as the raw SQL type and use the
+ * client API for ops.
+ */
+export const indexChunks = pgTable("index_chunks", {
+  id: text("id").primaryKey(),
+  sectionId: text("section_id").notNull(),
+  kind: text("kind", {
+    enum: ["summary", "question", "concept"],
+  }).notNull(),
+  text: text("text").notNull(),
+  // declare for typing; the actual column is vector(1536) — see DDL below.
+  embedding: jsonb("embedding").$type<number[]>().notNull().default(
+    sql`'[]'::jsonb`,
+  ),
+});
+
+export const INDEX_CHUNKS_CREATE = `
+CREATE TABLE IF NOT EXISTS index_chunks (
+  id text PRIMARY KEY,
+  section_id text NOT NULL,
+  kind text NOT NULL,
+  text text NOT NULL,
+  embedding vector(1536)
+);
+CREATE INDEX IF NOT EXISTS index_chunks_section ON index_chunks (section_id);
+`;
+
+/**
+ * Emergent concepts surfaced across runs. Merged by cosine similarity above
+ * a threshold (default 0.85) rather than string equality, so "RAG" /
+ * "Retrieval-Augmented Generation" collapse into one node.
+ */
+export const concepts = pgTable("concepts", {
+  id: text("id").primaryKey(),
+  /** Items row that holds the concept's markdown body (under _Concepts/). */
+  noteItemId: text("note_item_id"),
+  name: text("name").notNull(),
+  /** Sections that mention this concept: [{section_id, run_id}]. */
+  refs: jsonb("refs")
+    .$type<Array<{ sectionId: string; runId: string }>>()
+    .notNull()
+    .default([]),
+});
+
+export const CONCEPTS_CREATE = `
+CREATE TABLE IF NOT EXISTS concepts (
+  id text PRIMARY KEY,
+  note_item_id text,
+  name text NOT NULL,
+  refs jsonb NOT NULL DEFAULT '[]'::jsonb,
+  embedding vector(1536)
+);
+CREATE INDEX IF NOT EXISTS concepts_name ON concepts (name);
+`;
+
+/** Run these once at boot, after CREATE EXTENSION vector. */
+export const INDEXER_DDL: readonly string[] = [
+  INDEX_RUNS_CREATE,
+  INDEX_TARGETS_CREATE,
+  SECTIONS_CREATE,
+  INDEX_CHUNKS_CREATE,
+  CONCEPTS_CREATE,
+];
+
+export type DbSection = typeof sections.$inferSelect;
+export type DbIndexChunk = typeof indexChunks.$inferSelect;
+export type DbConcept = typeof concepts.$inferSelect;
+export type DbIndexTarget = typeof indexTargets.$inferSelect;

@@ -10,6 +10,8 @@ import remarkGfm from "remark-gfm";
 
 import { cn } from "@/lib/utils";
 import { remarkObsidian } from "@/lib/remark-obsidian";
+import { useBlobUrl } from "@/components/galexy/use-blob-url";
+import type { Note } from "@/lib/mock-notes";
 
 // Passes a list item's source line number down to its task checkbox (the
 // checkbox node itself carries no position).
@@ -31,6 +33,14 @@ type MarkdownViewProps = {
   onOpenWikiLink: (title: string) => void;
   onOpenTag: (tag: string) => void;
   onToggleTask?: (lineIndex: number) => void;
+  /**
+   * Resolves an `![alt](wikilink:Title)` image reference to a vault Note so
+   * the renderer can swap in the actual blob URL. Return null if the title
+   * doesn't resolve to an image item. Without this prop, wikilink: image
+   * srcs render as broken-image placeholders (browsers don't understand the
+   * scheme).
+   */
+  resolveWikiImage?: (title: string) => Note | null;
 };
 
 export function MarkdownView({
@@ -39,6 +49,7 @@ export function MarkdownView({
   onOpenWikiLink,
   onOpenTag,
   onToggleTask,
+  resolveWikiImage,
 }: MarkdownViewProps) {
   const components: Components = {
     li({ node, children, ...props }) {
@@ -99,6 +110,24 @@ export function MarkdownView({
         </a>
       );
     },
+    img({ src, alt, node, ...props }) {
+      void node;
+      if (typeof src === "string" && src.startsWith("wikilink:")) {
+        const title = decodeWikiTitle(src.slice("wikilink:".length));
+        const note = resolveWikiImage?.(title) ?? null;
+        if (note) {
+          return <WikilinkImage note={note} alt={alt ?? ""} />;
+        }
+        // Unresolved — surface the alt text so the reader at least knows what's missing.
+        return (
+          <span className="my-2 inline-block rounded-md border border-dashed border-muted-foreground/40 px-3 py-2 text-xs italic text-muted-foreground">
+            missing image{alt ? `: ${alt}` : ""}
+          </span>
+        );
+      }
+      // eslint-disable-next-line @next/next/no-img-element
+      return <img src={src} alt={alt ?? ""} {...props} />;
+    },
   };
 
   return (
@@ -153,5 +182,30 @@ function TaskCheckbox({
     >
       {checked && <Check className="size-[0.72em]" strokeWidth={3} />}
     </button>
+  );
+}
+
+/**
+ * Renders an image whose source is a vault Note — either an OPFS-backed blob
+ * (Note.blobKey) or a packaged asset (Note.src). Falls back to the alt text
+ * while the OPFS read is in flight or if neither source is available.
+ */
+function WikilinkImage({ note, alt }: { note: Note; alt: string }) {
+  const blobUrl = useBlobUrl(note.blobKey);
+  const url = blobUrl ?? note.src ?? null;
+  if (!url) {
+    return (
+      <span className="my-2 inline-block rounded-md border border-dashed border-muted-foreground/40 px-3 py-2 text-xs italic text-muted-foreground">
+        loading {alt || note.title}…
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt={alt || note.title}
+      className="my-3 rounded-md border bg-muted/20 max-w-full"
+    />
   );
 }

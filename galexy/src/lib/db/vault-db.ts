@@ -1,13 +1,20 @@
 import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite/vector";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { and, eq, sql } from "drizzle-orm";
 
 import {
   FOLDERS_CREATE,
+  INDEXER_DDL,
   ITEMS_CREATE,
   ITEMS_MIGRATIONS,
+  concepts,
   folders,
+  indexChunks,
+  indexRuns,
+  indexTargets,
   items,
+  sections,
   type DbItem,
   type NewDbItem,
 } from "@/lib/db/schema";
@@ -19,7 +26,15 @@ import {
   type SheetMeta,
 } from "@/lib/mock-notes";
 
-type Schema = { items: typeof items; folders: typeof folders };
+type Schema = {
+  items: typeof items;
+  folders: typeof folders;
+  indexRuns: typeof indexRuns;
+  indexTargets: typeof indexTargets;
+  sections: typeof sections;
+  indexChunks: typeof indexChunks;
+  concepts: typeof concepts;
+};
 export type VaultDb = PgliteDatabase<Schema>;
 
 let dbPromise: Promise<VaultDb> | null = null;
@@ -33,7 +48,14 @@ export function getVaultDb(): Promise<VaultDb> {
 async function create(): Promise<VaultDb> {
   const client = await PGlite.create("idb://galexy", {
     relaxedDurability: true,
+    extensions: { vector },
   });
+  // pgvector first — index_chunks / concepts both declare vector(1536) columns.
+  try {
+    await client.exec("CREATE EXTENSION IF NOT EXISTS vector;");
+  } catch (err) {
+    console.warn("[vault] pgvector enable failed:", err);
+  }
   await client.exec(ITEMS_CREATE);
   await client.exec(FOLDERS_CREATE);
   // Run each migration in its own exec so one statement can't shadow the next
@@ -45,7 +67,18 @@ async function create(): Promise<VaultDb> {
       console.warn("[vault] migration failed:", stmt, err);
     }
   }
-  const db = drizzle(client, { schema: { items, folders } });
+  // Indexer tables — each in its own exec so a single CREATE INDEX failure
+  // can't shadow the table beneath it.
+  for (const stmt of INDEXER_DDL) {
+    try {
+      await client.exec(stmt);
+    } catch (err) {
+      console.warn("[vault] indexer DDL failed:", stmt, err);
+    }
+  }
+  const db = drizzle(client, {
+    schema: { items, folders, indexRuns, indexTargets, sections, indexChunks, concepts },
+  });
   await seedIfEmpty(db);
   await applyContentUpgrades(db);
   return db;
@@ -183,9 +216,18 @@ export async function deleteItem(
   return rows[0]?.blobKey ?? null;
 }
 
+/**
+ * Delete a folder row AND every nested folder beneath it. Without the
+ * subtree wipe, buildNestedTree would re-create the parent on next render
+ * from any surviving descendant's path.
+ */
 export async function deleteFolderName(
   db: VaultDb,
   name: string,
 ): Promise<void> {
-  await db.delete(folders).where(eq(folders.name, name));
+  await db
+    .delete(folders)
+    .where(
+      sql`${folders.name} = ${name} OR ${folders.name} LIKE ${`${name}/%`}`,
+    );
 }

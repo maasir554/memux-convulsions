@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  FilePlus,
-  FolderPlus,
+  CheckSquare,
+  Plus,
   Search,
-  Sheet,
-  SquareCode,
+  Square,
+  Trash2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -20,12 +20,21 @@ import {
 import { cn } from "@/lib/utils";
 import {
   FileExplorer,
+  folderKey,
+  itemKey,
   type CreateKind,
   type CreatingState,
+  type SelectionKey,
 } from "@/components/galexy/file-explorer";
 import { GraphView } from "@/components/galexy/graph-view";
+import { CreateItemDialog } from "@/components/galexy/create-item-dialog";
 import type { LeftView } from "@/components/galexy/ribbon";
-import type { GraphEdge, Note } from "@/lib/mock-notes";
+import {
+  buildNestedTree,
+  type FolderNode,
+  type GraphEdge,
+  type Note,
+} from "@/lib/mock-notes";
 import type { UploadCategory } from "@/components/galexy/use-vault";
 
 type CreateNoteInput = {
@@ -55,6 +64,7 @@ type LeftSidebarProps = {
   ) => void | Promise<void>;
   onDeleteItem: (id: string) => void;
   onDeleteFolder: (name: string) => void;
+  onDeleteBulk: (itemIds: string[], folderPaths: string[]) => void;
 };
 
 const VIEW_TITLES: Record<LeftView, string> = {
@@ -63,35 +73,59 @@ const VIEW_TITLES: Record<LeftView, string> = {
   graph: "Graph view",
 };
 
-const ROOT_TOOLBAR_BUTTONS: {
-  kind: CreateKind;
-  label: string;
-  Icon: typeof FilePlus;
-}[] = [
-  { kind: "markdown", label: "New note (root)", Icon: FilePlus },
-  { kind: "code", label: "New code file (root)", Icon: SquareCode },
-  { kind: "csv", label: "New sheet (root)", Icon: Sheet },
-  { kind: "folder", label: "New folder (root)", Icon: FolderPlus },
-];
-
-/** Best-effort filename parsing: strip extension, infer code language. */
+/** Best-effort filename parsing for the inline (per-folder) create flow. */
 function parseName(
   raw: string,
   kind: CreateKind,
 ): { title: string; language?: string } {
   const trimmed = raw.trim();
-  if (kind === "markdown") {
-    return { title: trimmed.replace(/\.md$/i, "") };
-  }
-  if (kind === "csv") {
-    return { title: trimmed.replace(/\.csv$/i, "") };
-  }
+  if (kind === "markdown") return { title: trimmed.replace(/\.md$/i, "") };
+  if (kind === "csv") return { title: trimmed.replace(/\.csv$/i, "") };
   if (kind === "code") {
     const m = trimmed.match(/^(.+)\.(ts|tsx|js|jsx|py|rs|go|sh|json|css)$/i);
     if (m) return { title: m[1], language: m[2].toLowerCase() };
     return { title: trimmed };
   }
   return { title: trimmed };
+}
+
+function splitSelection(selected: Set<SelectionKey>): {
+  itemIds: string[];
+  folderPaths: string[];
+} {
+  const itemIds: string[] = [];
+  const folderPaths: string[] = [];
+  for (const key of selected) {
+    if (key.startsWith("item:")) itemIds.push(key.slice(5));
+    else if (key.startsWith("folder:")) folderPaths.push(key.slice(7));
+  }
+  return { itemIds, folderPaths };
+}
+
+/** Depth-first lookup of a folder node by its full path. */
+function findFolderNode(
+  nodes: FolderNode[],
+  path: string,
+): FolderNode | null {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    const found = findFolderNode(node.children, path);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Every descendant key (notes + subfolders, recursively). */
+function descendantKeys(node: FolderNode): SelectionKey[] {
+  const out: SelectionKey[] = [];
+  for (const child of node.children) {
+    out.push(folderKey(child.path));
+    out.push(...descendantKeys(child));
+  }
+  for (const note of node.notes) {
+    out.push(itemKey(note.id));
+  }
+  return out;
 }
 
 export function LeftSidebar({
@@ -110,8 +144,30 @@ export function LeftSidebar({
   onUploadFiles,
   onDeleteItem,
   onDeleteFolder,
+  onDeleteBulk,
 }: LeftSidebarProps) {
   const [creating, setCreating] = useState<CreatingState | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [selected, setSelected] = useState<Set<SelectionKey>>(
+    () => new Set(),
+  );
+
+  function toggleMultiSelect() {
+    setMultiSelect((v) => {
+      // Clear selection whenever multi-select is turned off so re-enabling
+      // starts fresh.
+      if (v) setSelected(new Set());
+      return !v;
+    });
+  }
+
+  // Folder tree used by both the file explorer and the create-dialog's
+  // "Location" picker.
+  const folderTree = useMemo(
+    () => buildNestedTree(notes, folderNames).topLevelFolders,
+    [notes, folderNames],
+  );
 
   const results =
     query.trim().length > 0
@@ -135,7 +191,10 @@ export function LeftSidebar({
       return;
     }
     if (creating.kind === "folder") {
-      void onCreateFolder(trimmed);
+      const path = creating.folder
+        ? `${creating.folder}/${trimmed}`
+        : trimmed;
+      void onCreateFolder(path);
     } else {
       const { title, language } = parseName(trimmed, creating.kind);
       if (title) {
@@ -158,39 +217,108 @@ export function LeftSidebar({
     void onUploadFiles(category, folder, files);
   }
 
+  function toggleSelect(key: SelectionKey) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const wasSelected = next.has(key);
+
+      // Folders cascade — checking a folder checks every descendant; unchecking
+      // it un-checks every descendant. Files just toggle themselves.
+      if (key.startsWith("folder:")) {
+        const path = key.slice(7);
+        const node = findFolderNode(folderTree, path);
+        const descendants = node ? descendantKeys(node) : [];
+        if (wasSelected) {
+          next.delete(key);
+          for (const d of descendants) next.delete(d);
+        } else {
+          next.add(key);
+          for (const d of descendants) next.add(d);
+        }
+      } else if (wasSelected) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  function handleBulkDelete() {
+    const { itemIds, folderPaths } = splitSelection(selected);
+    if (itemIds.length === 0 && folderPaths.length === 0) return;
+    onDeleteBulk(itemIds, folderPaths);
+    setSelected(new Set());
+  }
+
+  const selectionCount = selected.size;
+
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-9 shrink-0 items-center justify-between border-b pr-1 pl-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         <span>{VIEW_TITLES[view]}</span>
         {view === "files" && (
           <div className="flex items-center gap-0.5">
-            {ROOT_TOOLBAR_BUTTONS.map(({ kind, label, Icon }) => (
-              <Tooltip key={kind}>
+            {multiSelect && selectionCount > 0 && (
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className={cn(
-                      "size-6 text-muted-foreground hover:text-foreground",
-                      creating?.kind === kind &&
-                        creating.folder === "" &&
-                        "bg-sidebar-accent text-foreground",
-                    )}
-                    onClick={() =>
-                      setCreating((current) =>
-                        current?.kind === kind && current.folder === ""
-                          ? null
-                          : { kind, folder: "" },
-                      )
-                    }
-                    aria-label={label}
+                    size="sm"
+                    onClick={handleBulkDelete}
+                    className="h-6 gap-1 px-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
                   >
-                    <Icon className="size-3.5" />
+                    <Trash2 className="size-3.5" />
+                    <span className="text-[10px] tabular-nums">
+                      {selectionCount}
+                    </span>
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">{label}</TooltipContent>
+                <TooltipContent side="bottom">
+                  Delete {selectionCount} selected
+                </TooltipContent>
               </Tooltip>
-            ))}
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={toggleMultiSelect}
+                  aria-pressed={multiSelect}
+                  aria-label={
+                    multiSelect ? "Exit selection mode" : "Select multiple"
+                  }
+                  className={cn(
+                    "size-6 text-muted-foreground hover:text-foreground",
+                    multiSelect && "bg-sidebar-accent text-foreground",
+                  )}
+                >
+                  {multiSelect ? (
+                    <CheckSquare className="size-3.5" />
+                  ) : (
+                    <Square className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {multiSelect ? "Exit selection mode" : "Select multiple"}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setDialogOpen(true)}
+                  aria-label="Create new item"
+                  className="size-6 text-muted-foreground hover:text-foreground"
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Create new…</TooltipContent>
+            </Tooltip>
           </div>
         )}
       </div>
@@ -209,9 +337,24 @@ export function LeftSidebar({
             onUpload={handleUpload}
             onDeleteItem={onDeleteItem}
             onDeleteFolder={onDeleteFolder}
+            multiSelect={multiSelect}
+            selected={selected}
+            onToggleSelect={toggleSelect}
           />
         </ScrollArea>
       )}
+
+      <CreateItemDialog
+        // Re-key on open so the dialog remounts with fresh defaults each
+        // time, rather than resetting state in an effect (which the strict
+        // react-hooks lint forbids).
+        key={dialogOpen ? "open" : "closed"}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        folderTree={folderTree}
+        onCreateNote={onCreateNote}
+        onCreateFolder={onCreateFolder}
+      />
 
       {view === "search" && (
         <div className="flex min-h-0 flex-1 flex-col">

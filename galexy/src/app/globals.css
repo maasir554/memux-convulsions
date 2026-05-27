@@ -190,7 +190,11 @@
   --graph-user: #e8590c;
   --graph-workspace: #7048e8;
   --graph-active: #d6336c;
+  --graph-active-text: #1e3a8a;    /* deep blue on light bg — label of active node */
   --graph-link: #ced4da;
+  --graph-link-inbound: #e64980;   /* pink — points AT the active node */
+  --graph-link-outbound: #2f9e44;  /* green — points OUT of the active node */
+  --graph-link-mutual: #2563eb;    /* blue — bidirectional between active and peer */
   --graph-contains: #f08c00;
   --graph-tree: #868e96;
   --graph-text: #495057;
@@ -205,7 +209,11 @@
   --graph-user: #ff9f1c;
   --graph-workspace: #a78bfa;
   --graph-active: #ff6ac1;
+  --graph-active-text: #dbeafe;
   --graph-link: #3b3f51;
+  --graph-link-inbound: #ff6ac1;
+  --graph-link-outbound: #5cf08a;
+  --graph-link-mutual: #60a5fa;
   --graph-contains: #ffd43b;
   --graph-tree: #5b6480;
   --graph-text: #c8ccd4;
@@ -260,4 +268,85 @@
 .callout[data-callout="danger"],
 .callout[data-callout="error"] {
   --callout-color: var(--destructive);
+}
+/* ============================================================================
+ * Indexer live view — multi-color AI scanner band + soft glow border.
+ * The band is a translucent gradient swept top-to-bottom; the glow cycles
+ * cyan ↔ purple. Both pause when phase=done/failed (class .ai-still).
+ * ========================================================================== */
+/* Smooth full cycle: top → bottom → top → bottom … with ease-in-out
+   reversals so the band gently decelerates and reverses at each edge. */
+@keyframes ai-scan-sweep {
+  0%, 100% { transform: translateY(-110%); }
+  50%      { transform: translateY(110%); }
+}
+@keyframes ai-glow-cycle {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, oklch(0.7 0.18 295) 30%, transparent),
+      0 22px 60px -28px color-mix(in oklch, oklch(0.7 0.18 295) 55%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, oklch(0.75 0.16 205) 40%, transparent),
+      0 26px 70px -28px color-mix(in oklch, oklch(0.75 0.16 205) 60%, transparent);
+  }
+}
+.ai-scan-band {
+  position: absolute;
+  inset-inline: -10%;
+  height: 36%;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    color-mix(in oklch, oklch(0.78 0.18 205) 60%, transparent) 30%,
+    color-mix(in oklch, oklch(0.72 0.22 295) 75%, transparent) 50%,
+    color-mix(in oklch, oklch(0.74 0.18 350) 60%, transparent) 70%,
+    transparent 100%
+  );
+  mix-blend-mode: screen;
+  filter: blur(10px);
+  animation: ai-scan-sweep 5s ease-in-out infinite;
+  will-change: transform;
+}
+.ai-glow {
+  animation: ai-glow-cycle 3.4s ease-in-out infinite;
+}
+.ai-still .ai-scan-band { display: none; }
+.ai-still.ai-glow { animation: none; }
+.ai-done.ai-glow {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, oklch(0.78 0.18 160) 35%, transparent),
+    0 18px 50px -24px color-mix(in oklch, oklch(0.78 0.18 160) 50%, transparent);
+}
+.ai-failed.ai-glow {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--destructive) 40%, transparent),
+    0 18px 50px -24px color-mix(in oklch, var(--destructive) 50%, transparent);
+}
+
+/* ============================================================================
+ * Text shimmer — a moving highlight passes left-to-right across muted text
+ * to indicate active in-progress work (e.g. "Summarising…"). Disabled by
+ * removing the class.
+ * ========================================================================== */
+@keyframes ai-text-shimmer {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+.ai-text-shimmer {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--muted-foreground) 100%, transparent) 0%,
+    color-mix(in oklch, var(--muted-foreground) 100%, transparent) 35%,
+    var(--foreground) 50%,
+    color-mix(in oklch, var(--muted-foreground) 100%, transparent) 65%,
+    color-mix(in oklch, var(--muted-foreground) 100%, transparent) 100%
+  );
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent !important;
+  animation: ai-text-shimmer 2.4s linear infinite;
 }

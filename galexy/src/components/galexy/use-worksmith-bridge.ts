@@ -2,104 +2,147 @@
 
 import { useEffect } from "react";
 
-import type { useVault } from "@/components/galexy/use-vault";
+import { useIndexerStore } from "@/lib/indexer/queue-store";
+import { attachFiles, createDraft, enqueue } from "@/lib/indexer/queue-db";
 
 /**
- * Bridge protocol — the worksmith extension's content script posts messages
- * shaped like this to the galexy tab:
+ * Worksmith extension → memux indexer bridge.
  *
- *   window.postMessage({
- *     type: "memux.worksmith.captures",
- *     payload: WorksmithCapture[]
- *   }, window.location.origin);
+ * Protocol:
+ *   The extension's content script posts to the page:
+ *     { type: "memux.worksmith.captures", payload: WorksmithCapture[] }
+ *   We respond, after ingesting:
+ *     { type: "memux.worksmith.ack", externalIds: string[] }
  *
- * Galexy inserts each capture as a markdown note tagged `#worksmith` so the
- * existing search / graph / inbox views all see it. After ingest we post an
- * ack back so the extension can drop its outbound queue.
+ * Each capture becomes one indexer draft group → attach screenshots → enqueue.
+ * The pruned accessibility tree is appended to the group's prompt as JSON so
+ * the Visioner has it as supplementary context.
+ *
+ * The bridge is mounted on /memux/index only. If the page isn't open, the
+ * extension queues captures locally and retries when galexy is reopened.
  */
+
 export type WorksmithCapture = {
-  /** Stable extension-side id, used in the ack reply. */
   externalId: string;
+  kind: "snap" | "full";
   url: string;
   title: string;
-  /** Page text / a11y summary at capture time. */
-  text?: string;
-  /** ISO 8601. */
   capturedAt: string;
-  tabId?: number;
+  context?: string;
+  /** Data URLs (image/png typically) in capture order. */
+  screenshots: string[];
+  /** Pruned accessibility tree — small enough to drop in the prompt. */
+  prunedTree?: unknown;
+  nodeCount?: number;
+  viewport?: { width: number; height: number };
+  documentHeight?: number;
 };
 
 const INBOUND = "memux.worksmith.captures";
 const ACK = "memux.worksmith.ack";
 
-type CreateNote = ReturnType<typeof useVault>["createNote"];
-type UpdateContent = ReturnType<typeof useVault>["updateContent"];
-
-function isInbound(data: unknown): data is {
-  type: typeof INBOUND;
-  payload: WorksmithCapture[];
-} {
+function isInbound(
+  data: unknown,
+): data is { type: typeof INBOUND; payload: WorksmithCapture[] } {
   if (!data || typeof data !== "object") return false;
   const m = data as { type?: unknown; payload?: unknown };
-  return (
-    m.type === INBOUND &&
-    Array.isArray(m.payload) &&
-    m.payload.every(
-      (c) =>
-        c &&
-        typeof c === "object" &&
-        typeof (c as WorksmithCapture).url === "string" &&
-        typeof (c as WorksmithCapture).title === "string" &&
-        typeof (c as WorksmithCapture).externalId === "string",
-    )
-  );
+  if (m.type !== INBOUND || !Array.isArray(m.payload)) return false;
+  return m.payload.every((c) => {
+    if (!c || typeof c !== "object") return false;
+    const x = c as Partial<WorksmithCapture>;
+    return (
+      typeof x.externalId === "string" &&
+      typeof x.url === "string" &&
+      typeof x.title === "string" &&
+      (x.kind === "snap" || x.kind === "full") &&
+      Array.isArray(x.screenshots)
+    );
+  });
 }
 
-function captureToMarkdown(c: WorksmithCapture): string {
-  const lines = [`# ${c.title || c.url}`, ""];
-  lines.push("#worksmith #capture", "");
-  lines.push(`- **URL**: ${c.url}`);
-  lines.push(`- **Captured**: ${c.capturedAt}`);
-  if (c.tabId !== undefined) lines.push(`- **Tab**: ${c.tabId}`);
-  if (c.text && c.text.trim().length > 0) {
-    lines.push("", "## Snapshot", "", c.text.trim());
+function dataUrlToFile(dataUrl: string, name: string): File | null {
+  const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+  if (!m) return null;
+  const mime = m[1];
+  const b64 = m[2];
+  try {
+    const bin = atob(b64);
+    const buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    return new File([buf], name, { type: mime });
+  } catch {
+    return null;
   }
-  return lines.join("\n") + "\n";
 }
 
-/**
- * Install the bridge listener for as long as the host component is mounted.
- * Only accepts messages from the same origin (the extension content script
- * runs there) so untrusted pages can't seed the vault.
- */
-export function useWorksmithBridge(
-  createNote: CreateNote,
-  updateContent: UpdateContent,
-): void {
+function buildPrompt(c: WorksmithCapture): string {
+  const lines: string[] = [];
+  lines.push(`Captured from ${c.url}`);
+  lines.push(`Title: ${c.title}`);
+  lines.push(`Captured at: ${c.capturedAt}`);
+  if (c.context && c.context.trim()) {
+    lines.push("", "User context:", c.context.trim());
+  }
+  if (c.prunedTree) {
+    lines.push("", "Pruned accessibility tree (use as supplementary structure):");
+    lines.push("```json");
+    try {
+      lines.push(JSON.stringify(c.prunedTree, null, 0));
+    } catch {
+      lines.push("{}");
+    }
+    lines.push("```");
+  }
+  return lines.join("\n");
+}
+
+async function ingestOne(capture: WorksmithCapture): Promise<string | null> {
+  const files: File[] = [];
+  capture.screenshots.forEach((dataUrl, i) => {
+    const name = capture.kind === "full"
+      ? `${sanitise(capture.title) || "capture"}-${String(i + 1).padStart(2, "0")}.png`
+      : `${sanitise(capture.title) || "capture"}.png`;
+    const file = dataUrlToFile(dataUrl, name);
+    if (file) files.push(file);
+  });
+  if (files.length === 0) return null;
+
+  // Empty groupName → orchestrator's Namer agent will pick one on completion.
+  const id = await createDraft({
+    groupName: "",
+    prompt: buildPrompt(capture),
+  });
+  await attachFiles(id, files);
+  await enqueue(id);
+  return id;
+}
+
+function sanitise(s: string): string {
+  return s
+    .replace(/[^a-zA-Z0-9 _-]/g, "")
+    .trim()
+    .slice(0, 60);
+}
+
+/** Install the bridge listener for as long as the host component is mounted. */
+export function useWorksmithBridge(): void {
+  const load = useIndexerStore((s) => s.load);
+
   useEffect(() => {
     function handle(event: MessageEvent) {
-      // Same-origin only — Chrome's content scripts inject at the page's
-      // origin, so legitimate events satisfy this.
+      // Same-origin only — Chrome content scripts inject at the page's origin.
       if (event.origin !== window.location.origin) return;
       if (!isInbound(event.data)) return;
 
       const captures = event.data.payload;
-      const acks: string[] = [];
-
       (async () => {
+        const acks: string[] = [];
         for (const capture of captures) {
           try {
-            const id = await createNote({
-              type: "markdown",
-              title: capture.title || capture.url,
-              folder: "Worksmith",
-            });
-            // createNote seeds a stub body (`# Title`); replace it with the
-            // full capture markdown.
-            updateContent(id, captureToMarkdown(capture));
-            acks.push(capture.externalId);
+            const id = await ingestOne(capture);
+            if (id) acks.push(capture.externalId);
           } catch (err) {
-            console.warn("[worksmith] ingest failed:", capture.externalId, err);
+            console.warn("[worksmith→indexer] ingest failed:", capture.externalId, err);
           }
         }
         if (acks.length > 0) {
@@ -107,11 +150,13 @@ export function useWorksmithBridge(
             { type: ACK, externalIds: acks },
             window.location.origin,
           );
+          // Reload the queue so the new draft + queued groups appear in the sidebar.
+          await load();
         }
       })();
     }
 
     window.addEventListener("message", handle);
     return () => window.removeEventListener("message", handle);
-  }, [createNote, updateContent]);
+  }, [load]);
 }

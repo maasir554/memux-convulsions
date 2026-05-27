@@ -39,11 +39,38 @@ export type ModelInfo = {
   meta?: Record<string, unknown>;
 };
 
+export type EmbedTaskType =
+  | "RETRIEVAL_DOCUMENT"
+  | "RETRIEVAL_QUERY"
+  | "SEMANTIC_SIMILARITY"
+  | "CLASSIFICATION"
+  | "CLUSTERING"
+  | "QUESTION_ANSWERING"
+  | "FACT_VERIFICATION"
+  | "CODE_RETRIEVAL_QUERY";
+
+export type EmbedRequest = {
+  /** Defaults to gemini-embedding-001 when omitted. */
+  model?: string;
+  input: string[];
+  taskType?: EmbedTaskType;
+  /** Matryoshka truncation. Default 1536. */
+  outputDimensionality?: number;
+};
+
+export type EmbedResponse = {
+  model: string;
+  /** Already L2-normalised. */
+  embeddings: number[][];
+  usage?: { prompt_tokens?: number; total_tokens?: number };
+};
+
 export interface Provider {
   id: string;
   /** SSE-style chunks ("data: {...}\n\n"). Caller forwards them to the client. */
   streamChat(req: ChatRequest, signal: AbortSignal): AsyncIterable<string>;
   chat(req: ChatRequest, signal: AbortSignal): Promise<unknown>;
+  embed(req: EmbedRequest, signal: AbortSignal): Promise<EmbedResponse>;
   listModels(): Promise<ModelInfo[]>;
   health(): Promise<{ ok: boolean; detail?: unknown }>;
 }

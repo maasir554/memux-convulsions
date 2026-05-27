@@ -12,8 +12,9 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ItemIcon } from "@/components/galexy/item-icon";
-import { buildVaultTree, type Note } from "@/lib/mock-notes";
+import { buildNestedTree, type FolderNode, type Note } from "@/lib/mock-notes";
 import {
   FolderActionsPopover,
   FolderContextMenu,
@@ -27,6 +28,11 @@ export type CreateKind = "markdown" | "code" | "csv" | "folder";
 
 /** Inline-create state — kind plus the folder it should land in. */
 export type CreatingState = { kind: CreateKind; folder: string };
+
+/** Selection key encoding used by the multi-select bulk delete flow. */
+export type SelectionKey = `item:${string}` | `folder:${string}`;
+export const itemKey = (id: string): SelectionKey => `item:${id}`;
+export const folderKey = (path: string): SelectionKey => `folder:${path}`;
 
 // CSS color used to tint folder icons (matches the graph tier color so the
 // file tree and graph view share one visual identity for folders).
@@ -65,6 +71,10 @@ type FileExplorerProps = {
   onUpload: (category: UploadCategory, folder: string, files: File[]) => void;
   onDeleteItem: (id: string) => void;
   onDeleteFolder: (name: string) => void;
+  /** Multi-select mode — when true, rows render a checkbox. */
+  multiSelect: boolean;
+  selected: Set<SelectionKey>;
+  onToggleSelect: (key: SelectionKey) => void;
 };
 
 export function FileExplorer({
@@ -79,8 +89,11 @@ export function FileExplorer({
   onUpload,
   onDeleteItem,
   onDeleteFolder,
+  multiSelect,
+  selected,
+  onToggleSelect,
 }: FileExplorerProps) {
-  const tree = buildVaultTree(notes, folderNames);
+  const { rootNotes, topLevelFolders } = buildNestedTree(notes, folderNames);
   const creatingAtRoot = creating?.folder === "";
 
   return (
@@ -92,34 +105,36 @@ export function FileExplorer({
           onCancel={onCancel}
         />
       )}
-      {tree.map(({ folder, notes: folderNotes }) =>
-        folder === "" ? (
-          folderNotes.map((note) => (
-            <NoteItem
-              key={note.id}
-              note={note}
-              active={note.id === activeId}
-              onOpen={onOpen}
-              onDelete={onDeleteItem}
-            />
-          ))
-        ) : (
-          <FolderGroup
-            key={folder}
-            folder={folder}
-            notes={folderNotes}
-            activeId={activeId}
-            onOpen={onOpen}
-            creating={creating?.folder === folder ? creating : null}
-            onCommit={onCommit}
-            onCancel={onCancel}
-            onStartCreate={onStartCreate}
-            onUpload={onUpload}
-            onDeleteItem={onDeleteItem}
-            onDeleteFolder={onDeleteFolder}
-          />
-        ),
-      )}
+      {rootNotes.map((note) => (
+        <NoteItem
+          key={note.id}
+          note={note}
+          active={note.id === activeId}
+          onOpen={onOpen}
+          onDelete={onDeleteItem}
+          multiSelect={multiSelect}
+          selected={selected}
+          onToggleSelect={onToggleSelect}
+        />
+      ))}
+      {topLevelFolders.map((node) => (
+        <FolderGroup
+          key={node.path}
+          node={node}
+          activeId={activeId}
+          onOpen={onOpen}
+          creating={creating}
+          onCommit={onCommit}
+          onCancel={onCancel}
+          onStartCreate={onStartCreate}
+          onUpload={onUpload}
+          onDeleteItem={onDeleteItem}
+          onDeleteFolder={onDeleteFolder}
+          multiSelect={multiSelect}
+          selected={selected}
+          onToggleSelect={onToggleSelect}
+        />
+      ))}
     </div>
   );
 }
@@ -174,8 +189,7 @@ function NameInputRow({
 }
 
 function FolderGroup({
-  folder,
-  notes,
+  node,
   activeId,
   onOpen,
   creating,
@@ -185,9 +199,11 @@ function FolderGroup({
   onUpload,
   onDeleteItem,
   onDeleteFolder,
+  multiSelect,
+  selected,
+  onToggleSelect,
 }: {
-  folder: string;
-  notes: Note[];
+  node: FolderNode;
   activeId: string;
   onOpen: (id: string) => void;
   creating: CreatingState | null;
@@ -197,20 +213,39 @@ function FolderGroup({
   onUpload: (category: UploadCategory, folder: string, files: File[]) => void;
   onDeleteItem: (id: string) => void;
   onDeleteFolder: (name: string) => void;
+  multiSelect: boolean;
+  selected: Set<SelectionKey>;
+  onToggleSelect: (key: SelectionKey) => void;
 }) {
   const [open, setOpen] = useState(true);
+  const creatingHere = creating?.folder === node.path ? creating : null;
+  const isEmpty = node.notes.length === 0 && node.children.length === 0;
 
   return (
     <div>
       <FolderContextMenu
-        folder={folder}
+        folder={node.path}
         onStartCreate={onStartCreate}
         onUpload={onUpload}
         onDeleteFolder={onDeleteFolder}
       >
-        {/* Plain div wrapper so the popover-trigger button (Plus) can live as
-            a sibling without nesting buttons. */}
-        <div className="group/folder flex items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+        <div
+          className={cn(
+            "group/folder flex items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+            multiSelect &&
+              selected.has(folderKey(node.path)) &&
+              "bg-sidebar-accent text-foreground",
+          )}
+        >
+          {multiSelect && (
+            <div className="pl-2">
+              <Checkbox
+                checked={selected.has(folderKey(node.path))}
+                onCheckedChange={() => onToggleSelect(folderKey(node.path))}
+                aria-label={`Select folder ${node.label}`}
+              />
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
@@ -224,8 +259,8 @@ function FolderGroup({
             ) : (
               <Folder className="size-4" style={{ color: FOLDER_COLOR }} />
             )}
-            <span className="truncate font-medium">{folder}</span>
-            {notes.length === 0 && (
+            <span className="min-w-0 flex-1 truncate font-medium">{node.label}</span>
+            {isEmpty && (
               <span className="ml-1 text-[10px] text-muted-foreground/60">
                 empty
               </span>
@@ -233,7 +268,7 @@ function FolderGroup({
           </button>
           <div className="flex items-center gap-0.5 pr-1.5">
             <FolderActionsPopover
-              folder={folder}
+              folder={node.path}
               onStartCreate={onStartCreate}
               onUpload={onUpload}
               onDeleteFolder={onDeleteFolder}
@@ -243,27 +278,47 @@ function FolderGroup({
       </FolderContextMenu>
       {open && (
         <div className="ml-3 border-l pl-1">
-          {creating && (
+          {creatingHere && (
             <NameInputRow
-              kind={creating.kind}
+              kind={creatingHere.kind}
               onCommit={onCommit}
               onCancel={onCancel}
             />
           )}
-          {notes.length === 0 && !creating ? (
+          {node.children.map((child) => (
+            <FolderGroup
+              key={child.path}
+              node={child}
+              activeId={activeId}
+              onOpen={onOpen}
+              creating={creating}
+              onCommit={onCommit}
+              onCancel={onCancel}
+              onStartCreate={onStartCreate}
+              onUpload={onUpload}
+              onDeleteItem={onDeleteItem}
+              onDeleteFolder={onDeleteFolder}
+              multiSelect={multiSelect}
+              selected={selected}
+              onToggleSelect={onToggleSelect}
+            />
+          ))}
+          {node.notes.map((note) => (
+            <NoteItem
+              key={note.id}
+              note={note}
+              active={note.id === activeId}
+              onOpen={onOpen}
+              onDelete={onDeleteItem}
+              multiSelect={multiSelect}
+              selected={selected}
+              onToggleSelect={onToggleSelect}
+            />
+          ))}
+          {isEmpty && !creatingHere && (
             <p className="px-2 py-1 text-[11px] text-muted-foreground/60">
               No items yet.
             </p>
-          ) : (
-            notes.map((note) => (
-              <NoteItem
-                key={note.id}
-                note={note}
-                active={note.id === activeId}
-                onOpen={onOpen}
-                onDelete={onDeleteItem}
-              />
-            ))
           )}
         </div>
       )}
@@ -276,27 +331,45 @@ function NoteItem({
   active,
   onOpen,
   onDelete,
+  multiSelect,
+  selected,
+  onToggleSelect,
 }: {
   note: Note;
   active: boolean;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
+  multiSelect: boolean;
+  selected: Set<SelectionKey>;
+  onToggleSelect: (key: SelectionKey) => void;
 }) {
+  const sk = itemKey(note.id);
+  const isSelected = multiSelect && selected.has(sk);
   return (
     <ItemContextMenu itemId={note.id} onDelete={onDelete}>
       <div
         className={cn(
           "group/item flex items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
           active && "bg-sidebar-accent text-foreground",
+          isSelected && "bg-primary/10 text-foreground",
         )}
       >
+        {multiSelect && (
+          <div className="pl-2">
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={() => onToggleSelect(sk)}
+              aria-label={`Select ${note.title}`}
+            />
+          </div>
+        )}
         <button
           type="button"
           onClick={() => onOpen(note.id)}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md px-2 py-1 text-left"
         >
           <ItemIcon type={note.type} className="size-4 shrink-0" />
-          <span className="truncate">{note.title}</span>
+          <span className="min-w-0 flex-1 truncate">{note.title}</span>
         </button>
         <div className="flex items-center gap-0.5 pr-1.5">
           <ItemActionsPopover

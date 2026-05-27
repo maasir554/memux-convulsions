@@ -108,19 +108,36 @@ export interface TabState {
   events: ActivityEvent[];
 }
 
+export type CaptureKind = "stable" | "snap" | "full";
+
 export interface SavedCapture {
   id: string;
+  kind: CaptureKind;
   tabId: number;
   windowId: number;
   url: string;
   title: string;
   capturedAt: string;
   reason: string;
-  scrollSignature: string;
-  scrollState: ScrollState;
-  screenshotDataUrl: string;
+  /** Optional user-supplied context (popup input). */
+  context?: string;
+  scrollSignature?: string;
+  scrollState?: ScrollState;
+  /** Canonical: one entry for stable/snap, up to 15 for full. */
+  screenshots: string[];
+  /** Kept for backwards-compatibility with pre-schema entries. */
+  screenshotDataUrl?: string;
   accessibilitySnapshot: AccessibilitySnapshot;
   nodeCount: number;
+  /** Viewport size at capture time. */
+  viewport?: { width: number; height: number };
+  /** Document total height for full-capture context. */
+  documentHeight?: number;
+  /**
+   * True once this capture has been ack'd by an open galexy/memux tab. Only
+   * meaningful on user captures — auto (stable) captures stay local.
+   */
+  delivered?: boolean;
 }
 
 export interface WorksmithState {
@@ -131,7 +148,15 @@ export interface WorksmithState {
   tabs: Record<string, TabState>;
   events: ActivityEvent[];
   eventTypes: string[];
+  /**
+   * Combined list (user + auto) for the legacy UI; ordered the same as before
+   * (newest first). New code should prefer userCaptures / autoCaptures.
+   */
   savedCaptures: SavedCapture[];
+  /** User-triggered captures (kind = "snap" | "full"). High cap, shipped to memux. */
+  userCaptures: SavedCapture[];
+  /** Auto-triggered captures (kind = "stable"). Small cap, experimental, local only. */
+  autoCaptures: SavedCapture[];
   nextEventNumber: number;
 }
 
@@ -141,7 +166,11 @@ export type ConsoleMessage =
   | { type: "get-state" }
   | { type: "clear-log" }
   | { type: "capture-accessibility"; tabId?: number | null }
-  | { type: "select-view" };
+  | { type: "select-view" }
+  | { type: "delete-capture"; id: string }
+  | { type: "clear-captures" }
+  | { type: "open-console" }
+  | { type: "user-capture"; mode: "snap" | "full"; context?: string };
 
 export type BackgroundMessage =
   | { type: "state"; state: WorksmithState }

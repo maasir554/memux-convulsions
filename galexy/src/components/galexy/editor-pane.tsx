@@ -43,6 +43,7 @@ type EditorPaneProps = {
   linkExists: (title: string) => boolean;
   onOpenWikiLink: (title: string) => void;
   onOpenTag: (tag: string) => void;
+  resolveWikiImage?: (title: string) => Note | null;
 };
 
 export function EditorPane({
@@ -59,6 +60,7 @@ export function EditorPane({
   linkExists,
   onOpenWikiLink,
   onOpenTag,
+  resolveWikiImage,
 }: EditorPaneProps) {
   const [mode, setMode] = useState<EditorMode>("read");
 
@@ -112,6 +114,7 @@ export function EditorPane({
           linkExists={linkExists}
           onOpenWikiLink={onOpenWikiLink}
           onOpenTag={onOpenTag}
+          resolveWikiImage={resolveWikiImage}
         />
       ) : (
         <EmptyState />
@@ -131,6 +134,7 @@ function Body({
   linkExists,
   onOpenWikiLink,
   onOpenTag,
+  resolveWikiImage,
 }: {
   item: Note;
   mode: EditorMode;
@@ -142,6 +146,7 @@ function Body({
   linkExists: (title: string) => boolean;
   onOpenWikiLink: (title: string) => void;
   onOpenTag: (tag: string) => void;
+  resolveWikiImage?: (title: string) => Note | null;
 }) {
   switch (item.type) {
     case "markdown":
@@ -153,6 +158,7 @@ function Body({
               linkExists={linkExists}
               onOpenWikiLink={onOpenWikiLink}
               onOpenTag={onOpenTag}
+              resolveWikiImage={resolveWikiImage}
               onToggleTask={(lineIndex) =>
                 onChange(item.id, toggleTaskInContent(item.content, lineIndex))
               }
@@ -207,7 +213,11 @@ function Body({
     case "pdf":
       return (
         <div className="min-h-0 flex-1">
+          {/* key={item.id} forces a clean remount per file — otherwise
+              naturalSize / scale / visiblePages / pageNodes leak across PDFs
+              and a narrower file inherits the wider file's slot dimensions. */}
           <PdfViewer
+            key={item.id}
             item={item}
             onAnnotationsChange={(anns) => onPdfAnnotationsChange(item.id, anns)}
           />

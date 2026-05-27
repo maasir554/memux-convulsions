@@ -293,12 +293,20 @@ export function useVault(): Vault {
       const cascade = opts?.cascade ?? false;
       const removedIds: string[] = [];
 
+      // A path is inside this folder if it matches exactly OR sits under
+      // a `${name}/` prefix. Without the prefix check, items in nested
+      // subfolders survive, and buildNestedTree re-creates the parent
+      // from their orphaned paths.
+      const prefix = `${name}/`;
+      const isInside = (folderPath: string): boolean =>
+        folderPath === name || folderPath.startsWith(prefix);
+
       if (cascade) {
         // Snapshot child ids from current local state, then delete each.
         const childIds: string[] = [];
         setNotes((prev) => {
           if (!prev) return prev;
-          for (const n of prev) if (n.folder === name) childIds.push(n.id);
+          for (const n of prev) if (isInside(n.folder)) childIds.push(n.id);
           return prev;
         });
         for (const id of childIds) {
@@ -312,7 +320,9 @@ export function useVault(): Vault {
         }
       }
 
-      setFolders((prev) => (prev ? prev.filter((n) => n !== name) : prev));
+      setFolders((prev) =>
+        prev ? prev.filter((n) => !isInside(n)) : prev,
+      );
       const db = dbRef.current;
       if (db) {
         try {

@@ -9,6 +9,14 @@ let lastUrl = location.href;
 let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "worksmith.ping") {
+    // Used by the background script to detect whether this tab already has
+    // the content script loaded. Avoid re-injecting (and double-registering
+    // listeners + timers) when the answer is yes.
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (message?.type === "worksmith.captureAccessibility") {
     try {
       const snapshot = buildAccessibilityTree();
@@ -56,8 +64,70 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "worksmith.flash") {
+    showFlash();
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message?.type === "worksmith.scrollStep") {
+    const by = typeof message.by === "number" ? message.by : 0;
+    const to = typeof message.to === "number" ? message.to : null;
+    if (to !== null) {
+      window.scrollTo({ top: to, left: 0, behavior: "auto" });
+    } else {
+      window.scrollBy({ top: by, left: 0, behavior: "auto" });
+    }
+    const scrollState = getScrollState();
+    sendResponse({
+      ok: true,
+      scrollState,
+      url: location.href,
+      title: document.title,
+    });
+    return true;
+  }
+
   return false;
 });
+
+function ensureFlashStyles(): void {
+  if (document.getElementById("__worksmith_flash_kf__")) return;
+  const style = document.createElement("style");
+  style.id = "__worksmith_flash_kf__";
+  style.textContent = `
+    @property --ws-angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+    #__worksmith_flash__ {
+      position: fixed; inset: 0; pointer-events: none; z-index: 2147483647;
+      padding: 7px;
+      background: conic-gradient(from var(--ws-angle, 0deg),
+        #f472b6 0deg, #fbe055 90deg, #f472b6 180deg, #fbe055 270deg, #f472b6 360deg);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+              mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: source-out;
+              mask-composite: exclude;
+      opacity: 0; filter: blur(0);
+      animation: ws-flash-fade 1100ms ease-out forwards, ws-flash-rotate 1100ms linear forwards;
+    }
+    @keyframes ws-flash-fade {
+      0% { opacity: 0; filter: blur(2px); }
+      18% { opacity: 0.95; filter: blur(0); }
+      60% { opacity: 0.65; }
+      100% { opacity: 0; }
+    }
+    @keyframes ws-flash-rotate { to { --ws-angle: 540deg; } }
+  `;
+  document.documentElement.appendChild(style);
+}
+
+function showFlash(): void {
+  ensureFlashStyles();
+  document.getElementById("__worksmith_flash__")?.remove();
+  const el = document.createElement("div");
+  el.id = "__worksmith_flash__";
+  document.documentElement.appendChild(el);
+  setTimeout(() => el.remove(), 1200);
+}
 
 document.addEventListener(
   "scroll",

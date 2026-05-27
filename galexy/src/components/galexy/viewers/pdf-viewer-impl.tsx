@@ -59,6 +59,27 @@ const DEFAULT_PAGE_HEIGHT = 792;
 // scroll, more memory. 3 above + 3 below is plenty for a smooth wheel-scroll.
 const PREMOUNT_RADIUS = 3;
 
+/**
+ * Auxiliary asset URLs for pdfjs. Copied into public/pdfjs/ at install time
+ * by scripts/sync-pdfjs-assets.mjs.
+ *
+ * - cMapUrl / cMapPacked: character maps for CJK and other non-Latin PDFs.
+ * - standardFontDataUrl: Foxit fallback fonts when the PDF doesn't embed.
+ * - wasmUrl: openjpeg (JPEG2000 / JPX) + qcms (color management). Most
+ *   scanned books compress every page as JPX, so without this they render
+ *   as blank pages with "Dependent image isn't ready yet" warnings.
+ *
+ * Lives at module scope so the object reference is stable across HMR re-runs
+ * — react-pdf otherwise warns "Options prop … changed but it's equal", and
+ * worse, the doc would re-init on every hot reload.
+ */
+const DOC_OPTIONS = {
+  cMapUrl: "/pdfjs/cmaps/",
+  cMapPacked: true,
+  standardFontDataUrl: "/pdfjs/standard_fonts/",
+  wasmUrl: "/pdfjs/wasm/",
+} as const;
+
 /** A draft box being drawn, or awaiting its first comment. */
 type Draft = {
   pageIndex: number;
@@ -120,6 +141,14 @@ export default function PdfViewerImpl({ item, onAnnotationsChange }: Props) {
   const pageNodes = useRef(new Map<number, HTMLDivElement>());
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // scaleRef tracks the latest scale for imperative event handlers attached
+  // via addEventListener (reading `scale` directly would close over a stale
+  // value).
+  const scaleRef = useRef(scale);
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
+
   const registerPageNode = useCallback(
     (pageIndex: number, node: HTMLDivElement | null) => {
       if (node) pageNodes.current.set(pageIndex, node);
@@ -135,29 +164,6 @@ export default function PdfViewerImpl({ item, onAnnotationsChange }: Props) {
 
   // Stable file= prop so react-pdf doesn't re-fetch on every render.
   const fileOption = useMemo(() => (src ? { url: src } : null), [src]);
-
-  /**
-   * Auxiliary asset URLs for pdfjs. These are copied into public/pdfjs/ at
-   * install time by scripts/sync-pdfjs-assets.mjs, so the URLs are stable
-   * absolute paths served by the dev / prod Next.js server.
-   *
-   * - cMapUrl / cMapPacked: character maps for CJK and other non-Latin PDFs.
-   * - standardFontDataUrl: Foxit fallback fonts when the PDF doesn't embed.
-   * - wasmUrl: openjpeg (JPEG2000 / JPX) + qcms (color management). Most
-   *   scanned books compress every page as JPX, so without this they render
-   *   as blank pages with "Dependent image isn't ready yet" warnings.
-   *
-   * Memoized once so the Document doesn't re-init on every render.
-   */
-  const docOptions = useMemo(
-    () => ({
-      cMapUrl: "/pdfjs/cmaps/",
-      cMapPacked: true,
-      standardFontDataUrl: "/pdfjs/standard_fonts/",
-      wasmUrl: "/pdfjs/wasm/",
-    }),
-    [],
-  );
 
   const commit = useCallback(
     (next: PdfAnnotation[]) => onAnnotationsChange?.(next),
@@ -273,6 +279,128 @@ export default function PdfViewerImpl({ item, onAnnotationsChange }: Props) {
     for (const node of pageNodes.current.values()) io.observe(node);
     return () => io.disconnect();
   }, [numPages]);
+
+  /**
+   * Pinch-to-zoom on the PDF.
+   *
+   * Three input paths, because no two browsers agree on how trackpad
+   * gestures arrive:
+   *
+   *   - `wheel` + `ctrlKey: true`  — Chrome / Firefox / Edge trackpad pinch
+   *     and also plain Ctrl+scroll (so a mouse user can zoom too).
+   *   - `gesturestart/change/end`  — Safari's WebKit-only gesture events for
+   *     trackpad pinch (Chrome / Firefox don't dispatch them, but listening
+   *     is cheap).
+   *   - `touchstart/move/end`      — touchscreens (iPad, Android, touch
+   *     laptops). Two-finger distance ratio drives the scale.
+   *
+   * The wheel listener is attached at `window` level with `capture: true` so
+   * react-pdf's canvases / text-layer divs can't swallow the event before we
+   * see it. We filter to events whose target is inside the PDF scroll area,
+   * so editor zoom in other parts of the page is unaffected.
+   *
+   * All listeners are `{ passive: false }` where they need to preventDefault
+   * the browser's native page zoom.
+   */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const clamp = (s: number) =>
+      Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
+
+    const isOverViewer = (target: EventTarget | null): boolean =>
+      target instanceof Node && el.contains(target);
+
+    const onWheel = (e: WheelEvent) => {
+      // Diagnostic — every wheel event at the window-capture level, so we
+      // can tell "no events arriving" from "events arriving but missing
+      // ctrlKey". Strip once root cause is identified.
+      console.log("[pdf] wheel", {
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        deltaY: e.deltaY,
+        overViewer: isOverViewer(e.target),
+        targetTag: e.target instanceof Element ? e.target.tagName : "?",
+      });
+      if (!e.ctrlKey) return;
+      if (!isOverViewer(e.target)) return;
+      e.preventDefault();
+      // deltaY < 0 → pinch-out / zoom-in. The 0.01 coefficient makes the
+      // exponential feel close to native (1px pinch ≈ 1% zoom).
+      const factor = Math.exp(-e.deltaY * 0.01);
+      setScale((prev) => {
+        const next = clamp(prev * factor);
+        console.log("[pdf] scale", prev.toFixed(3), "→", next.toFixed(3));
+        return next;
+      });
+    };
+
+    // Safari only. The event type is non-standard so we use string keys.
+    type GestureEvent = Event & { scale: number };
+    let gestureStartScale = 1;
+    const onGestureStart = (e: Event) => {
+      if (!isOverViewer(e.target)) return;
+      e.preventDefault();
+      gestureStartScale = scaleRef.current;
+    };
+    const onGestureChange = (e: Event) => {
+      if (!isOverViewer(e.target)) return;
+      e.preventDefault();
+      const s = (e as GestureEvent).scale;
+      if (typeof s === "number" && Number.isFinite(s)) {
+        setScale(clamp(gestureStartScale * s));
+      }
+    };
+
+    let pinchStartDist = 0;
+    let pinchStartScale = 1;
+    const touchDistance = (touches: TouchList): number => {
+      const a = touches[0];
+      const b = touches[1];
+      return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        pinchStartDist = touchDistance(e.touches);
+        pinchStartScale = scaleRef.current;
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || pinchStartDist === 0) return;
+      e.preventDefault();
+      const ratio = touchDistance(e.touches) / pinchStartDist;
+      setScale(clamp(pinchStartScale * ratio));
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinchStartDist = 0;
+    };
+
+    // Attach the wheel listener directly to the scroll container with
+    // capture: true. Window-level was eaten by something multi-page
+    // specific; the scroll element is where wheels go anyway.
+    el.addEventListener("wheel", onWheel, {
+      passive: false,
+      capture: true,
+    });
+    // One-shot diagnostic so you can verify in the browser console that the
+    // pinch listeners actually mounted. Remove once confirmed working.
+    console.log("[pdf] pinch listeners attached");
+    el.addEventListener("gesturestart", onGestureStart, { passive: false });
+    el.addEventListener("gesturechange", onGestureChange, { passive: false });
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener("wheel", onWheel, { capture: true });
+      el.removeEventListener("gesturestart", onGestureStart);
+      el.removeEventListener("gesturechange", onGestureChange);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, []);
 
   const onPageLoadSuccess = useCallback(
     (page: { originalWidth: number; originalHeight: number }) => {
@@ -493,7 +621,7 @@ export default function PdfViewerImpl({ item, onAnnotationsChange }: Props) {
       >
         <Document
           file={fileOption}
-          options={docOptions}
+          options={DOC_OPTIONS}
           onLoadSuccess={({ numPages }) => setNumPages(numPages)}
           loading={<ViewerFallback label="Loading PDF…" />}
           error={<ViewerFallback label="Failed to load PDF." />}

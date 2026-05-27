@@ -1,6 +1,6 @@
 "use client";
 
-import { type MouseEvent, useEffect, useRef } from "react";
+import { type MouseEvent, useEffect, useMemo, useRef } from "react";
 import ForceGraph2D, {
   type ForceGraphMethods,
   type LinkObject,
@@ -8,6 +8,7 @@ import ForceGraph2D, {
 } from "react-force-graph-2d";
 
 import type { ItemType } from "@/lib/mock-notes";
+import { TIER_Y } from "@/components/galexy/graph-tiers";
 
 // File items use ItemType; "user" and "workspace" are tree-tier synthetic
 // nodes that live only in the graph layer.
@@ -44,7 +45,18 @@ export type GraphColors = {
   user: string;
   workspace: string;
   active: string;
+  /** Label colour for the active node — separate from its fill so the text
+   *  reads as "I'm focused here" while the node circle stays its accent
+   *  colour. */
+  activeText: string;
   link: string;
+  /** Wikilinks that POINT AT the active node (someone references me). */
+  linkInbound: string;
+  /** Wikilinks that POINT AWAY from the active node (I reference them). */
+  linkOutbound: string;
+  /** Both an inbound and an outbound wikilink exist between active and the
+   *  same peer — a mutual reference. */
+  linkMutual: string;
   contains: string;
   tree: string;
   text: string;
@@ -59,33 +71,65 @@ type ForceGraphCanvasProps = {
   onOpen: (id: string) => void;
 };
 
-/** Target y-coordinate per tier (simulation units). */
-const TIER_Y: Record<GraphNodeKind, number> = {
-  user: -340,
-  workspace: -200,
-  folder: -70,
-  markdown: 90,
-  code: 90,
-  csv: 90,
-  pdf: 90,
-  image: 90,
+const TIER_TARGET_Y: Record<GraphNodeKind, number> = {
+  user: TIER_Y.user,
+  workspace: TIER_Y.workspace,
+  folder: TIER_Y.folder,
+  markdown: TIER_Y.file,
+  code: TIER_Y.file,
+  csv: TIER_Y.file,
+  pdf: TIER_Y.file,
+  image: TIER_Y.file,
 };
 
+// Files keep a soft pull (they can drift a little to avoid label collisions);
+// folders are pinned via fy from graph-view.tsx, so their strength only acts
+// as a stabilizer if the pin is removed.
 const TIER_STRENGTH: Record<GraphNodeKind, number> = {
-  user: 0.6, // also pinned via fy, this just stabilizes
+  user: 0.6,
   workspace: 0.6,
-  folder: 0.18,
-  markdown: 0.08,
-  code: 0.08,
-  csv: 0.08,
-  pdf: 0.08,
-  image: 0.08,
+  folder: 0.4,
+  markdown: 0.18,
+  code: 0.18,
+  csv: 0.18,
+  pdf: 0.18,
+  image: 0.18,
 };
+
+/** Max characters before the label gets ellipsized. */
+/**
+ * Zoom-aware label truncation.
+ *
+ * - At zoom 1× → CHARS_AT_1X characters fit before the ellipsis.
+ * - Zoom in → more characters allowed (generous, because labels are big).
+ * - Zoom out → fewer characters (tight, because labels crowd each other).
+ *
+ * Clamped to [MIN, MAX] so extreme zooms don't either disappear the text or
+ * blow it out across other nodes.
+ */
+const LABEL_MIN_CHARS = 6;
+const LABEL_MAX_CHARS = 32;
+const LABEL_CHARS_AT_1X = 12;
+
+function truncate(label: string, scale: number): string {
+  const limit = Math.max(
+    LABEL_MIN_CHARS,
+    Math.min(LABEL_MAX_CHARS, Math.round(LABEL_CHARS_AT_1X * scale)),
+  );
+  if (label.length <= limit) return label;
+  return label.slice(0, limit - 1) + "…";
+}
 
 const isTier = (kind: GraphNodeKind) => kind === "user" || kind === "workspace";
 
 function radius(node: GraphNode): number {
   if (isTier(node.type)) return 6 + Math.sqrt(node.val) * 0.6;
+  if (node.type === "folder") {
+    // Folder size hints at how full it is, but capped so a folder with 200
+    // children doesn't dwarf the entire band. (sqrt(val) * 0.4) caps out
+    // around radius 7 even for huge folders.
+    return Math.min(7, 2.2 + Math.sqrt(node.val) * 0.4);
+  }
   return 1.5 + Math.sqrt(node.val) * 0.8;
 }
 
@@ -105,20 +149,73 @@ function endpointId(end: string | number | NodeObject<GraphNode>): string {
  * within-tier dynamics free. Implements the d3-force `force(alpha)` /
  * `force.initialize(nodes)` interface.
  */
+/**
+ * Strength multiplier applied when a node has drifted ABOVE its tier band.
+ * Keeps files strictly below folders — the link force can pull a file up
+ * toward its parent folder, but this barrier overpowers it.
+ */
+const TIER_UPWARD_PENALTY = 6;
+
+/** Total vertical range a file can occupy below the tier-Y.file line. */
+const FILE_BAND_DEPTH = 360;
+
+const FILE_TYPES = new Set<GraphNodeKind>([
+  "markdown",
+  "code",
+  "csv",
+  "pdf",
+  "image",
+]);
+
+/**
+ * Deterministic per-id y offset in [0, FILE_BAND_DEPTH). Each file gets its
+ * own row inside the file band — without this, the link force (containment
+ * edges from a folder above) springs every file back to one shared y line.
+ */
+function fileTargetY(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = (h * 31 + id.charCodeAt(i)) | 0;
+  }
+  return TIER_Y.file + (Math.abs(h) % FILE_BAND_DEPTH);
+}
+
 function makeTierYForce() {
   let nodes: GraphNode[] = [];
   const force = (alpha: number) => {
     for (const node of nodes) {
       if (node.fy != null) continue; // pinned — skip
-      const target = TIER_Y[node.type];
+      const bandTop = TIER_TARGET_Y[node.type];
       const strength = TIER_STRENGTH[node.type];
-      if (target == null || strength == null) continue;
+      if (bandTop == null || strength == null) continue;
       const y = node.y ?? 0;
-      node.vy = (node.vy ?? 0) + (target - y) * strength * alpha;
+      if (y < bandTop) {
+        node.vy =
+          (node.vy ?? 0) +
+          (bandTop - y) * strength * TIER_UPWARD_PENALTY * alpha;
+      } else {
+        node.vy = (node.vy ?? 0) + (bandTop - y) * strength * alpha;
+      }
     }
   };
+  /**
+   * On initialize, pin every file's fy to its hashed row. d3-force's link
+   * force has strength ~1/min(degA, degB), which for a low-degree file is
+   * way higher than any reasonable tier-Y soft pull (the "spring effect"
+   * you were seeing). The only way to defeat it on the y-axis is to make
+   * fy non-null — d3-force then leaves vy alone for that node.
+   *
+   * x stays free, so charge + link force handle horizontal layout per
+   * folder cluster as before.
+   */
   force.initialize = (n: GraphNode[]) => {
     nodes = n;
+    for (const node of nodes) {
+      if (node.fy != null) continue;
+      if (FILE_TYPES.has(node.type)) {
+        node.fy = fileTargetY(node.id);
+      }
+    }
   };
   return force;
 }
@@ -136,8 +233,31 @@ export default function ForceGraphCanvas({
   >(undefined);
   const downPos = useRef<{ x: number; y: number } | null>(null);
 
+  /**
+   * Peers of the active node that have BOTH an inbound and an outbound
+   * wikilink relative to active — i.e. mutual references. Edges to/from
+   * these peers are drawn in the mutual colour instead of green/pink.
+   */
+  const mutualPeers = useMemo(() => {
+    const peers = new Set<string>();
+    if (!activeId) return peers;
+    const out = new Set<string>();
+    const inn = new Set<string>();
+    for (const link of graphData.links) {
+      if (link.kind !== "link") continue;
+      const s = endpointId(link.source);
+      const t = endpointId(link.target);
+      if (s === activeId) out.add(t);
+      if (t === activeId) inn.add(s);
+    }
+    for (const v of out) if (inn.has(v)) peers.add(v);
+    return peers;
+  }, [graphData.links, activeId]);
+
   // Install the tier-Y force once the graph is mounted, and tune link distance
-  // so structural (tree/contains) edges spread the layout vertically.
+  // so structural (tree/contains) edges spread the layout vertically. Boost
+  // the charge force so file nodes don't clump together (the default ~ -30
+  // produces overlapping labels for any vault > a handful of items).
   useEffect(() => {
     const fg = fgRef.current;
     if (!fg) return;
@@ -146,10 +266,29 @@ export default function ForceGraphCanvas({
       | { distance: (fn: (link: GraphLink) => number) => unknown }
       | undefined;
     linkForce?.distance((link) => {
-      if (link.kind === "tree") return 90;
-      if (link.kind === "contains") return 50;
-      return 30;
+      if (link.kind === "tree") return 60;
+      if (link.kind === "contains") return 55;
+      return 35;
     });
+    const chargeForce = fg.d3Force("charge") as
+      | {
+          strength: (fn: (n: GraphNode) => number) => unknown;
+          distanceMax: (v: number) => unknown;
+        }
+      | undefined;
+    chargeForce?.strength((n) => {
+      // Tier-band nodes barely repel — their position is mostly pinned.
+      if (n.type === "user" || n.type === "workspace") return -40;
+      // Folders are pinned on y too, so charge acts purely horizontally —
+      // strong enough that sibling folders never collide on their shared row.
+      if (n.type === "folder") return -600;
+      // Files: aggressive horizontal push so the link force from a shared
+      // parent folder can't drag them onto the same x-column. Files are
+      // pinned on y (per-id row), so this charge effectively only spreads
+      // them horizontally.
+      return -700;
+    });
+    chargeForce?.distanceMax(900);
     fg.d3ReheatSimulation();
   }, [graphData]);
 
@@ -164,7 +303,8 @@ export default function ForceGraphCanvas({
       }
       if (measureCtx) {
         measureCtx.font = `${fontSize}px ui-sans-serif, system-ui, sans-serif`;
-        const halfText = measureCtx.measureText(node.name).width / 2 + 2;
+        const halfText =
+          measureCtx.measureText(truncate(node.name, scale)).width / 2 + 2;
         const withinX = Math.abs(graphX - node.x) <= halfText;
         const withinY =
           graphY >= node.y + r && graphY <= node.y + r + 1.5 + fontSize + 2;
@@ -216,23 +356,103 @@ export default function ForceGraphCanvas({
         cooldownTicks={150}
         enableNodeDrag={false}
         nodeLabel={() => ""}
-        linkWidth={(link) => {
-          if (link.kind === "tree") return 1.4;
-          if (link.kind === "contains") return 0.75;
-          return 1;
+        // Replace default link rendering so widths + arrow sizes stay constant
+        // across zoom levels (default rendering uses graph units, so widths
+        // scale with the camera).
+        linkCanvasObjectMode={() => "replace"}
+        linkCanvasObject={(link, ctx, globalScale) => {
+          const s =
+            typeof link.source === "object"
+              ? (link.source as NodeObject<GraphNode>)
+              : null;
+          const t =
+            typeof link.target === "object"
+              ? (link.target as NodeObject<GraphNode>)
+              : null;
+          if (
+            !s ||
+            !t ||
+            s.x == null ||
+            s.y == null ||
+            t.x == null ||
+            t.y == null
+          )
+            return;
+
+          // Resolve colour per kind. For wikilinks (kind === "link") we also
+          // tint the edge based on its direction relative to the active node:
+          //   active → peer        →  outbound (green)
+          //   peer  → active       →  inbound  (pink)
+          //   mutual (both exist)  →  both edges drawn in mutual (blue)
+          const sourceId = endpointId(link.source);
+          const targetId = endpointId(link.target);
+          let stroke: string;
+          if (link.kind === "tree") stroke = colors.tree;
+          else if (link.kind === "contains") {
+            stroke =
+              sourceId === activeId ? colors.contains : colors.link;
+          } else if (activeId && sourceId === activeId) {
+            stroke = mutualPeers.has(targetId)
+              ? colors.linkMutual
+              : colors.linkOutbound;
+          } else if (activeId && targetId === activeId) {
+            stroke = mutualPeers.has(sourceId)
+              ? colors.linkMutual
+              : colors.linkInbound;
+          } else {
+            stroke = colors.link;
+          }
+
+          // Target on-screen widths in CSS px (dividing by globalScale
+          // converts to graph units at the current zoom).
+          const widthPx =
+            link.kind === "tree"
+              ? 1.4
+              : link.kind === "contains"
+              ? 0.6
+              : 0.9;
+          ctx.lineWidth = widthPx / globalScale;
+          ctx.strokeStyle = stroke;
+          ctx.beginPath();
+          ctx.moveTo(s.x, s.y);
+          ctx.lineTo(t.x, t.y);
+          ctx.stroke();
+
+          // Arrowhead only for wikilinks (the directional reference edges).
+          // Tree and contains links are structural — undirected visually.
+          if (link.kind === "link") {
+            const dx = t.x - s.x;
+            const dy = t.y - s.y;
+            const len = Math.hypot(dx, dy);
+            if (len < 0.001) return;
+            const ux = dx / len;
+            const uy = dy / len;
+            const tr = radius(t as GraphNode);
+            // Base of the arrow sits just outside the target node.
+            const baseX = t.x - ux * (tr + 1 / globalScale);
+            const baseY = t.y - uy * (tr + 1 / globalScale);
+            const arrowLen = 5 / globalScale; // constant on-screen px
+            const arrowWid = 3 / globalScale;
+            // Perpendicular vector.
+            const px = -uy;
+            const py = ux;
+            ctx.beginPath();
+            ctx.moveTo(baseX, baseY);
+            ctx.lineTo(
+              baseX - ux * arrowLen + px * arrowWid,
+              baseY - uy * arrowLen + py * arrowWid,
+            );
+            ctx.lineTo(
+              baseX - ux * arrowLen - px * arrowWid,
+              baseY - uy * arrowLen - py * arrowWid,
+            );
+            ctx.closePath();
+            // Arrowhead matches the line color so the inbound/outbound tint
+            // reads as one continuous cue.
+            ctx.fillStyle = stroke;
+            ctx.fill();
+          }
         }}
-        linkColor={(link) => {
-          if (link.kind === "tree") return colors.tree;
-          if (link.kind !== "contains") return colors.link;
-          return endpointId(link.source) === activeId
-            ? colors.contains
-            : colors.link;
-        }}
-        linkDirectionalArrowLength={(link) =>
-          link.kind === "link" ? 3 : 0
-        }
-        linkDirectionalArrowRelPos={1}
-        linkDirectionalArrowColor={() => colors.link}
         nodeCanvasObject={(node, ctx, scale) => {
           if (node.x === undefined || node.y === undefined) return;
           const r = radius(node);
@@ -260,11 +480,26 @@ export default function ForceGraphCanvas({
           const fontSize = tier
             ? Math.max(13 / scale, 3.5)
             : Math.max(12 / scale, 3);
-          ctx.font = `${tier ? 600 : 400} ${fontSize}px ui-sans-serif, system-ui, sans-serif`;
+          // Active label: bolder weight + a soft dark shadow underneath so
+          // the lighter blue text pops on any backdrop (other nodes / edges
+          // can pass behind it). Non-active labels stay clean.
+          const weight = isActive ? 700 : tier ? 600 : 400;
+          ctx.font = `${weight} ${fontSize}px ui-sans-serif, system-ui, sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "top";
-          ctx.fillStyle = isActive ? colors.active : colors.text;
-          ctx.fillText(node.name, node.x, node.y + r + 1.5);
+          if (isActive) {
+            ctx.save();
+            ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
+            ctx.shadowBlur = 6 / scale;
+            ctx.shadowOffsetY = 1 / scale;
+          }
+          ctx.fillStyle = isActive ? colors.activeText : colors.text;
+          ctx.fillText(
+            truncate(node.name, scale),
+            node.x,
+            node.y + r + 1.5,
+          );
+          if (isActive) ctx.restore();
         }}
       />
     </div>

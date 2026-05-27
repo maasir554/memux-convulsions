@@ -2,16 +2,32 @@ import { defineManifest } from "@crxjs/vite-plugin";
 
 export default defineManifest({
   manifest_version: 3,
-  name: "Worksmith",
+  name: "MEMUX Capture",
   description:
-    "Chromium browser automation debug console for tab, URL, scroll, and accessibility telemetry.",
+    "Capture page snapshots, full-page scrolls, and accessibility trees, and ship them into the MEMUX indexer.",
   version: "0.1.0",
-  action: { default_title: "Open Worksmith" },
+  icons: {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png",
+  },
+  action: {
+    default_title: "MEMUX Capture",
+    default_popup: "popup.html",
+    default_icon: {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png",
+    },
+  },
   options_page: "index.html",
   background: { service_worker: "src/background/background.ts" },
   permissions: [
     "activeTab",
     "alarms",
+    "scripting",
     "storage",
     "tabs",
     "unlimitedStorage",

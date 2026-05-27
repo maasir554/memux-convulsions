@@ -436,3 +436,94 @@ export function buildVaultTree(
     ),
   }));
 }
+
+/**
+ * A nested folder node in the file-explorer tree. Folder names that contain
+ * "/" are split into ancestor + descendant segments — so a note with
+ * folder="_Indexes/Beever AI" lands inside the "Beever AI" branch that's a
+ * child of the "_Indexes" branch.
+ *
+ * Intermediate paths are materialised implicitly even if no item or row in
+ * the `folders` table names them directly, so `_Indexes` always appears as a
+ * parent for `_Indexes/<group>` items.
+ */
+export type FolderNode = {
+  /** Full canonical path used for all folder operations (delete, upload, create-in). */
+  path: string;
+  /** Last segment of the path — what the user sees in the tree. */
+  label: string;
+  /** Items directly in this folder (note.folder === path). */
+  notes: Note[];
+  /** Child folder nodes. */
+  children: FolderNode[];
+};
+
+/**
+ * Build a nested folder tree. Returns root-level notes (folder === "") and a
+ * sorted list of top-level folder nodes. Every node's `notes` and `children`
+ * arrays are sorted alphabetically.
+ */
+export function buildNestedTree(
+  notes: Note[],
+  extraFolderNames: readonly string[] = [],
+): { rootNotes: Note[]; topLevelFolders: FolderNode[] } {
+  const allPaths = new Set<string>();
+  const rootNotes: Note[] = [];
+
+  function addPathWithAncestors(path: string): void {
+    if (!path) return;
+    const parts = path.split("/");
+    for (let i = 1; i <= parts.length; i++) {
+      allPaths.add(parts.slice(0, i).join("/"));
+    }
+  }
+
+  for (const note of notes) {
+    if (!note.folder) {
+      rootNotes.push(note);
+    } else {
+      addPathWithAncestors(note.folder);
+    }
+  }
+  for (const name of extraFolderNames) addPathWithAncestors(name);
+
+  // Create a node for every path, then wire parent → children.
+  const nodes = new Map<string, FolderNode>();
+  for (const path of allPaths) {
+    const parts = path.split("/");
+    nodes.set(path, {
+      path,
+      label: parts[parts.length - 1],
+      notes: [],
+      children: [],
+    });
+  }
+  for (const note of notes) {
+    if (!note.folder) continue;
+    const node = nodes.get(note.folder);
+    if (node) node.notes.push(note);
+  }
+  const topLevel: FolderNode[] = [];
+  for (const [path, node] of nodes) {
+    const parts = path.split("/");
+    if (parts.length === 1) {
+      topLevel.push(node);
+    } else {
+      const parent = nodes.get(parts.slice(0, -1).join("/"));
+      if (parent) parent.children.push(node);
+      else topLevel.push(node);
+    }
+  }
+
+  // Recursively sort.
+  function sortNode(n: FolderNode): void {
+    n.notes.sort((a, b) => a.title.localeCompare(b.title));
+    n.children.sort((a, b) => a.label.localeCompare(b.label));
+    for (const c of n.children) sortNode(c);
+  }
+  topLevel.sort((a, b) => a.label.localeCompare(b.label));
+  for (const t of topLevel) sortNode(t);
+  rootNotes.sort((a, b) => a.title.localeCompare(b.title));
+
+  return { rootNotes, topLevelFolders: topLevel };
+}

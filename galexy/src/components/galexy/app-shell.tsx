@@ -25,7 +25,6 @@ import {
   type Note,
 } from "@/lib/mock-notes";
 import { useVault } from "@/components/galexy/use-vault";
-import { useWorksmithBridge } from "@/components/galexy/use-worksmith-bridge";
 
 const ANIM_MS = 240;
 
@@ -45,9 +44,6 @@ export function AppShell() {
   const notes = useMemo(() => loadedNotes ?? [], [loadedNotes]);
   const folderNames = useMemo(() => loadedFolders ?? [], [loadedFolders]);
 
-  // Inbound capture bridge from the worksmith extension. No-op until the
-  // extension's content script starts posting; safe to install unconditionally.
-  useWorksmithBridge(createNote, updateContent);
   const [activeId, setActiveId] = useState<string | null>("welcome");
   const [openTabs, setOpenTabs] = useState<string[]>(["welcome"]);
   const [leftView, setLeftView] = useState<LeftView>("files");
@@ -161,6 +157,14 @@ export function AppShell() {
     return titleToId.has(title.toLowerCase());
   }
 
+  function resolveWikiImage(title: string): Note | null {
+    const id = titleToId.get(title.toLowerCase());
+    if (!id) return null;
+    const note = byId.get(id);
+    if (!note || note.type !== "image") return null;
+    return note;
+  }
+
   function openTag(tag: string) {
     setQuery(tag);
     setLeftView("search");
@@ -230,7 +234,10 @@ export function AppShell() {
   }
 
   async function handleDeleteFolder(name: string) {
-    const childCount = notes.filter((n) => n.folder === name).length;
+    const prefix = `${name}/`;
+    const childCount = notes.filter(
+      (n) => n.folder === name || n.folder.startsWith(prefix),
+    ).length;
     const msg =
       childCount === 0
         ? `Delete folder “${name}”?`
@@ -240,6 +247,53 @@ export function AppShell() {
     if (!window.confirm(msg)) return;
     const removed = await removeFolder(name, { cascade: childCount > 0 });
     for (const id of removed) dropTab(id);
+  }
+
+  /**
+   * Bulk delete from the multi-select panel. Counts every item that would be
+   * affected — directly-selected items + items inside any selected folder —
+   * and shows one combined confirmation so the user isn't clicking through
+   * N prompts.
+   */
+  async function handleDeleteBulk(
+    itemIds: string[],
+    folderPaths: string[],
+  ): Promise<void> {
+    const cascadeIds = new Set<string>(itemIds);
+    for (const path of folderPaths) {
+      const prefix = `${path}/`;
+      for (const n of notes) {
+        if (n.folder === path || n.folder.startsWith(prefix)) {
+          cascadeIds.add(n.id);
+        }
+      }
+    }
+    const fileCount = cascadeIds.size;
+    const folderCount = folderPaths.length;
+    if (fileCount === 0 && folderCount === 0) return;
+
+    const parts: string[] = [];
+    if (fileCount > 0)
+      parts.push(`${fileCount} item${fileCount === 1 ? "" : "s"}`);
+    if (folderCount > 0)
+      parts.push(`${folderCount} folder${folderCount === 1 ? "" : "s"}`);
+    const msg = `Delete ${parts.join(" and ")}? This can't be undone.`;
+    if (!window.confirm(msg)) return;
+
+    // Items first, then folders — so cascade-counted items aren't double-
+    // counted by removeFolder's own cascade walk.
+    for (const id of itemIds) {
+      dropTab(id);
+      try {
+        await removeItem(id);
+      } catch {
+        // useVault logs + rolls back state; nothing else to do here.
+      }
+    }
+    for (const path of folderPaths) {
+      const removed = await removeFolder(path, { cascade: true });
+      for (const id of removed) dropTab(id);
+    }
   }
 
   return (
@@ -263,7 +317,7 @@ export function AppShell() {
             collapsedSize={0}
             defaultSize="20%"
             minSize="14%"
-            maxSize="34%"
+            maxSize="50%"
             onResize={(size: PanelSize) =>
               setLeftCollapsed(size.asPercentage < 1)
             }
@@ -285,6 +339,7 @@ export function AppShell() {
               onUploadFiles={handleUploadFiles}
               onDeleteItem={handleDeleteItem}
               onDeleteFolder={handleDeleteFolder}
+              onDeleteBulk={handleDeleteBulk}
             />
           </ResizablePanel>
 
@@ -311,6 +366,7 @@ export function AppShell() {
               linkExists={wikiLinkExists}
               onOpenWikiLink={openWikiLink}
               onOpenTag={openTag}
+              resolveWikiImage={resolveWikiImage}
             />
           </ResizablePanel>
 

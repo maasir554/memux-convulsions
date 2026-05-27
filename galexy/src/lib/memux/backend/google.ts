@@ -3,6 +3,8 @@ import "server-only";
 import type {
   ChatMessage,
   ChatRequest,
+  EmbedRequest,
+  EmbedResponse,
   ModelInfo,
   Provider,
 } from "@/lib/memux/backend/types";
@@ -145,14 +147,21 @@ function buildBody(req: ChatRequest) {
 async function postNative(
   apiKey: string,
   model: string,
-  action: "streamGenerateContent" | "generateContent",
+  action:
+    | "streamGenerateContent"
+    | "generateContent"
+    | "batchEmbedContents",
   body: unknown,
   signal: AbortSignal,
 ): Promise<Response> {
-  const path =
-    action === "streamGenerateContent"
-      ? `${BASE}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`
-      : `${BASE}/models/${encodeURIComponent(model)}:generateContent`;
+  let path: string;
+  if (action === "streamGenerateContent") {
+    path = `${BASE}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`;
+  } else if (action === "batchEmbedContents") {
+    path = `${BASE}/models/${encodeURIComponent(model)}:batchEmbedContents`;
+  } else {
+    path = `${BASE}/models/${encodeURIComponent(model)}:generateContent`;
+  }
   return fetch(path, {
     method: "POST",
     headers: {
@@ -332,6 +341,43 @@ export function google(): Provider & { keyCount(): number } {
       };
     },
 
+    async embed(req: EmbedRequest, signal: AbortSignal): Promise<EmbedResponse> {
+      const model = req.model ?? "gemini-embedding-001";
+      const dim = req.outputDimensionality ?? 1536;
+      const body = {
+        requests: req.input.map((text) => ({
+          model: `models/${model}`,
+          content: { parts: [{ text }] },
+          taskType: req.taskType ?? "RETRIEVAL_DOCUMENT",
+          outputDimensionality: dim,
+        })),
+      };
+      const res = await runWithRotation(rotator, async (key) => {
+        const r = await postNative(key, model, "batchEmbedContents", body, signal);
+        await ensureOkOrRetry(r, key, "embed");
+        return r;
+      });
+      type BatchEmbedResponse = {
+        embeddings: Array<{ values: number[] }>;
+        usageMetadata?: { promptTokenCount?: number; totalTokenCount?: number };
+      };
+      const json = (await res.json()) as BatchEmbedResponse;
+      // gemini-embedding-001 does NOT auto-normalise non-3072 truncations, so
+      // we L2-normalise unconditionally — safe for already-normalised vectors
+      // (norm 1 stays norm 1) and required for everything else.
+      const embeddings = json.embeddings.map((e) => l2normalize(e.values));
+      return {
+        model,
+        embeddings,
+        usage: json.usageMetadata
+          ? {
+              prompt_tokens: json.usageMetadata.promptTokenCount,
+              total_tokens: json.usageMetadata.totalTokenCount,
+            }
+          : undefined,
+      };
+    },
+
     async listModels(): Promise<ModelInfo[]> {
       return MODELS;
     },
@@ -343,4 +389,14 @@ export function google(): Provider & { keyCount(): number } {
       };
     },
   };
+}
+
+function l2normalize(v: number[]): number[] {
+  let sumSq = 0;
+  for (const x of v) sumSq += x * x;
+  const norm = Math.sqrt(sumSq);
+  if (norm === 0) return v.slice();
+  const out = new Array<number>(v.length);
+  for (let i = 0; i < v.length; i++) out[i] = v[i] / norm;
+  return out;
 }

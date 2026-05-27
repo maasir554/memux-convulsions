@@ -18,7 +18,12 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
+        // Radix wraps children in an inline `display: table` div, which lets
+        // long content overflow the viewport horizontally — breaking truncate
+        // on every descendant. Forcing the wrapper to `display: block` keeps
+        // children at the viewport's width so flex+truncate can actually
+        // shrink them. !important wins over Radix's inline style.
+        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 [&>div]:!block"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

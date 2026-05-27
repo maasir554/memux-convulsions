@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MEMUX Capture</title>
+    <script>
+      // The popup is always dark — it's a capture overlay, not bound to the
+      // console's user theme.
+      document.documentElement.classList.add("dark");
+    </script>
+    <style>
+      /* Pin the dark palette directly to <body> via inline style so the
+         Tailwind utilities (bg-background, bg-card, text-foreground, …) that
+         resolve to var(--background)/etc. always pick up these values
+         regardless of extension/popup style-loading order. */
+      html, body {
+        margin: 0;
+        background-color: oklch(0.145 0 0);
+        color: oklch(0.985 0 0);
+        color-scheme: dark;
+      }
+      body {
+        /* Neutral charcoal — no green cast. Same scale as galexy's dark theme
+           so the brand reads continuous across surfaces. */
+        --background: oklch(0.145 0 0);
+        --foreground: oklch(0.985 0 0);
+        --card: oklch(0.205 0 0);
+        --card-foreground: oklch(0.985 0 0);
+        --popover: oklch(0.205 0 0);
+        --popover-foreground: oklch(0.985 0 0);
+        /* Warm pink primary so the focus ring + status accents line up with
+           the gradient mark. */
+        --primary: oklch(0.78 0.15 350);
+        --primary-foreground: oklch(0.15 0 0);
+        --secondary: oklch(0.269 0 0);
+        --secondary-foreground: oklch(0.985 0 0);
+        --muted: oklch(0.269 0 0);
+        --muted-foreground: oklch(0.708 0 0);
+        --accent: oklch(0.269 0 0);
+        --accent-foreground: oklch(0.985 0 0);
+        --destructive: oklch(0.704 0.191 22.216);
+        --border: oklch(1 0 0 / 8%);
+        --input: oklch(1 0 0 / 12%);
+        --ring: oklch(0.78 0.15 350);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/popup/main.tsx"></script>
+  </body>
+</html>

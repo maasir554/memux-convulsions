@@ -1,0 +1,376 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ---------------------------------------------------------------------------
+   Worksmith theme — "sleek dark dev-tool"
+   Dark-first; light is a clean neutral fallback. One indigo accent.
+--------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: light;
+  --radius: 0.6rem;
+
+  --background: #fafdf9;
+  --foreground: #182019;
+  --card: #ffffff;
+  --card-foreground: #182019;
+  --popover: #ffffff;
+  --popover-foreground: #182019;
+  --primary: #db2777;
+  --primary-foreground: #ffffff;
+  --secondary: #eef3ee;
+  --secondary-foreground: #182019;
+  --muted: #eef3ee;
+  --muted-foreground: #5f6b62;
+  --accent: #fde6f1;
+  --accent-foreground: #9d174d;
+  --destructive: #ef4444;
+  --border: #d8e2d9;
+  --input: #d4dcd5;
+  --ring: #db2777;
+
+  --elevated: #ffffff;
+  --accent-solid: #db2777;
+  --border-strong: #aeb8af;
+  --match: #fde6f1;
+  --canary: #ca8a04;
+  --canary-foreground: #ffffff;
+}
+
+.dark {
+  color-scheme: dark;
+  /* subtle greenish-dark surfaces (hint of green, not olive) */
+  --background: #0b100d;
+  --foreground: #e6ebe6;
+  --card: #121913;
+  --card-foreground: #e6ebe6;
+  --popover: #151c16;
+  --popover-foreground: #e6ebe6;
+
+  /* soft rose primary (desaturated from a hot pink) */
+  --primary: #e8a3c4;
+  --primary-foreground: #1a0a13;
+
+  --secondary: #1b221d;
+  --secondary-foreground: #e6ebe6;
+  --muted: #161d17;
+  --muted-foreground: #8d978e;
+
+  /* accent = soft rose overlay tint (hover, role text) */
+  --accent: #20181e;
+  --accent-foreground: #dab1c6;
+
+  --destructive: #f87171;
+  --border: #1f261f;
+  --input: #1f261f;
+  --ring: #e8a3c4;
+
+  --elevated: #181f18;
+  --accent-solid: #e8a3c4;
+  --border-strong: #2a322a;
+  --match: #26121d;
+
+  /* soft canary "mark" accent — @indices, connection dot, brand */
+  --canary: #dccc66;
+  --canary-foreground: #1a1503;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-elevated: var(--elevated);
+  --color-accent-solid: var(--accent-solid);
+  --color-canary: var(--canary);
+  --color-canary-foreground: var(--canary-foreground);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Consolas,
+    "Liberation Mono", monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
+    overflow: hidden;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Thin, theme-aware scrollbars for the dev-tool feel. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--muted-foreground) 35%, transparent) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  *::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+    background-color: color-mix(in srgb, var(--muted-foreground) 30%, transparent);
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+/* Subtle ambient glow behind the app — gives the dark surface some life. */
+@layer components {
+  .app-ambient {
+    background:
+      radial-gradient(900px 500px at 8% -8%, color-mix(in srgb, var(--accent-solid) 11%, transparent), transparent 60%),
+      radial-gradient(700px 500px at 100% 6%, color-mix(in srgb, var(--canary) 6%, transparent), transparent 55%);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Accessibility tree explorer (bespoke: horizontal scroll + fixed chips).
+   Re-themed to match the dark dev-tool palette.
+--------------------------------------------------------------------------- */
+.tree-explorer {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tree-output {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 12px 14px;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tree-root {
+  width: max-content;
+  min-width: 100%;
+}
+
+.tree-node {
+  position: relative;
+  min-width: 0;
+}
+
+.tree-node::before {
+  content: "";
+  position: absolute;
+  top: 28px;
+  bottom: 0;
+  left: calc((var(--depth) * 16px) + 17px);
+  width: 1px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.tree-node.leaf::before {
+  display: none;
+}
+
+.tree-node-summary {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  min-height: 28px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px 3px calc((var(--depth) * 16px) + 10px);
+  cursor: pointer;
+  list-style: none;
+  border-radius: 6px;
+}
+
+.tree-node-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tree-node-summary::before {
+  content: "›";
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  transition: transform 130ms ease;
+}
+
+.tree-node[open] > .tree-node-summary::before {
+  transform: rotate(90deg);
+}
+
+.tree-node.leaf > .tree-node-summary::before {
+  content: "·";
+  color: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+}
+
+.tree-node-summary:hover {
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+.tree-node.matched > .tree-node-summary {
+  background: var(--match);
+}
+
+.tree-node-main {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  padding-right: 104px;
+}
+
+.tree-role {
+  flex: 0 0 auto;
+  color: var(--accent-foreground);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tree-name {
+  flex: 0 0 auto;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+
+.tree-text {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.tree-node-meta {
+  position: sticky;
+  right: 0;
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+  gap: 4px;
+  padding-left: 10px;
+  background: var(--card);
+  box-shadow: -12px 0 10px -8px var(--card);
+}
+
+.tree-node-summary:hover .tree-node-meta {
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+  box-shadow: -12px 0 10px -8px color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+.tree-node.matched > .tree-node-summary .tree-node-meta {
+  background: var(--match);
+  box-shadow: -12px 0 10px -8px var(--match);
+}
+
+.tree-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  max-width: 110px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  border-radius: 5px;
+  padding: 0 6px;
+  background: color-mix(in srgb, var(--background) 60%, transparent);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tree-node-children {
+  margin-left: 0;
+}
+
+.tree-node-data {
+  display: grid;
+  grid-template-columns: 64px max-content;
+  gap: 4px 10px;
+  width: max-content;
+  max-width: calc(var(--right-width, 460px) - (var(--depth) * 16px) - 80px);
+  margin: 2px 10px 8px calc((var(--depth) * 16px) + 32px);
+  overflow: auto;
+  border-left: 2px solid color-mix(in srgb, var(--accent-solid) 45%, transparent);
+  border-radius: 0 6px 6px 0;
+  padding: 8px 11px;
+  background: color-mix(in srgb, var(--muted) 60%, transparent);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+}
+
+.tree-node-data dt,
+.tree-node-data dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.tree-node-data dt {
+  color: var(--muted-foreground);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+
+.tree-node-data dd {
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.empty {
+  margin: 0;
+  padding: 22px 14px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-align: center;
+}

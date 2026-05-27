@@ -10,6 +10,8 @@ const EMPTY_STATE: WorksmithState = {
   events: [],
   eventTypes: [],
   savedCaptures: [],
+  userCaptures: [],
+  autoCaptures: [],
   nextEventNumber: 1,
 };
 
@@ -19,6 +21,8 @@ export interface UseWorksmith {
   captureError: string | null;
   clearLog: () => void;
   captureAccessibility: (tabId?: number | null) => void;
+  deleteCapture: (id: string) => void;
+  clearCaptures: () => void;
 }
 
 export function useWorksmith(): UseWorksmith {
@@ -78,5 +82,21 @@ export function useWorksmith(): UseWorksmith {
     portRef.current?.postMessage({ type: "capture-accessibility", tabId });
   }, []);
 
-  return { state, connected, captureError, clearLog, captureAccessibility };
+  const deleteCapture = useCallback((id: string) => {
+    portRef.current?.postMessage({ type: "delete-capture", id });
+  }, []);
+
+  const clearCaptures = useCallback(() => {
+    portRef.current?.postMessage({ type: "clear-captures" });
+  }, []);
+
+  return {
+    state,
+    connected,
+    captureError,
+    clearLog,
+    captureAccessibility,
+    deleteCapture,
+    clearCaptures,
+  };
 }
