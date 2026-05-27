@@ -25,12 +25,29 @@ import {
   type Note,
 } from "@/lib/mock-notes";
 import { useVault } from "@/components/galexy/use-vault";
+import { useWorksmithBridge } from "@/components/galexy/use-worksmith-bridge";
 
 const ANIM_MS = 240;
 
 export function AppShell() {
-  const { notes: loadedNotes, updateContent } = useVault();
+  const {
+    notes: loadedNotes,
+    folders: loadedFolders,
+    updateContent,
+    updateSheetMeta,
+    updatePdfAnnotations,
+    createNote,
+    createFolder,
+    uploadFiles,
+    removeItem,
+    removeFolder,
+  } = useVault();
   const notes = useMemo(() => loadedNotes ?? [], [loadedNotes]);
+  const folderNames = useMemo(() => loadedFolders ?? [], [loadedFolders]);
+
+  // Inbound capture bridge from the worksmith extension. No-op until the
+  // extension's content script starts posting; safe to install unconditionally.
+  useWorksmithBridge(createNote, updateContent);
   const [activeId, setActiveId] = useState<string | null>("welcome");
   const [openTabs, setOpenTabs] = useState<string[]>(["welcome"]);
   const [leftView, setLeftView] = useState<LeftView>("files");
@@ -73,7 +90,11 @@ export function AppShell() {
   }
 
   // Files + derived folder items = everything addressable (graph nodes, tabs).
-  const allItems = useMemo(() => buildItems(notes), [notes]);
+  // folderNames lets empty folders persist past page reload.
+  const allItems = useMemo(
+    () => buildItems(notes, folderNames),
+    [notes, folderNames],
+  );
   const byId = useMemo(() => new Map(allItems.map((n) => [n.id, n])), [allItems]);
   const titleToId = useMemo(
     () => new Map(allItems.map((n) => [n.title.toLowerCase(), n.id])),
@@ -155,12 +176,70 @@ export function AppShell() {
     if (leftCollapsed) toggleLeft();
   }
 
-  if (!loadedNotes) {
+  if (!loadedNotes || !loadedFolders) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-background text-sm text-muted-foreground">
         Loading vault…
       </div>
     );
+  }
+
+  async function handleCreateNote(input: {
+    type: "markdown" | "code" | "csv";
+    title: string;
+    folder?: string;
+    language?: string;
+  }) {
+    const id = await createNote(input);
+    openNote(id);
+  }
+
+  async function handleUploadFiles(
+    category: Parameters<typeof uploadFiles>[0]["category"],
+    folder: string,
+    files: File[],
+  ) {
+    const ids = await uploadFiles({ category, folder, files });
+    if (ids.length > 0) openNote(ids[0]);
+  }
+
+  /** Drop a tab without going through the user-initiated close path. */
+  function dropTab(id: string) {
+    setOpenTabs((tabs) => {
+      if (!tabs.includes(id)) return tabs;
+      const next = tabs.filter((t) => t !== id);
+      if (id === activeId) {
+        const idx = tabs.indexOf(id);
+        setActiveId(next[idx] ?? next[idx - 1] ?? next[0] ?? null);
+      }
+      return next;
+    });
+  }
+
+  async function handleDeleteItem(id: string) {
+    const note = byId.get(id);
+    const label = note?.title ?? "this item";
+    if (!window.confirm(`Delete “${label}”? This can't be undone.`)) return;
+    dropTab(id);
+    try {
+      await removeItem(id);
+    } catch {
+      // useVault already logs + rolls back local state; surface tab again.
+      setOpenTabs((tabs) => (tabs.includes(id) ? tabs : [...tabs, id]));
+    }
+  }
+
+  async function handleDeleteFolder(name: string) {
+    const childCount = notes.filter((n) => n.folder === name).length;
+    const msg =
+      childCount === 0
+        ? `Delete folder “${name}”?`
+        : `Delete folder “${name}” and its ${childCount} item${
+            childCount === 1 ? "" : "s"
+          }? This can't be undone.`;
+    if (!window.confirm(msg)) return;
+    const removed = await removeFolder(name, { cascade: childCount > 0 });
+    for (const id of removed) dropTab(id);
   }
 
   return (
@@ -194,12 +273,18 @@ export function AppShell() {
               view={leftView}
               notes={notes}
               items={allItems}
+              folderNames={folderNames}
               activeId={activeId ?? ""}
               onOpen={openNote}
               query={query}
               onQueryChange={setQuery}
               edges={edges}
               backlinkCount={backlinkCount}
+              onCreateNote={handleCreateNote}
+              onCreateFolder={createFolder}
+              onUploadFiles={handleUploadFiles}
+              onDeleteItem={handleDeleteItem}
+              onDeleteFolder={handleDeleteFolder}
             />
           </ResizablePanel>
 
@@ -221,6 +306,8 @@ export function AppShell() {
               onClose={closeTab}
               onOpen={openNote}
               onChange={updateContent}
+              onSheetMetaChange={updateSheetMeta}
+              onPdfAnnotationsChange={updatePdfAnnotations}
               linkExists={wikiLinkExists}
               onOpenWikiLink={openWikiLink}
               onOpenTag={openTag}

@@ -26,7 +26,12 @@ export function ItemIcon({
     case "image":
       return <ImageIcon className={className} />;
     case "folder":
-      return <Folder className={className} />;
+      return (
+        <Folder
+          className={className}
+          style={{ color: "var(--graph-folder)" }}
+        />
+      );
     case "markdown":
     default:
       return <FileText className={className} />;

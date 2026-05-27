@@ -10,23 +10,53 @@ import {
 import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
 import UniverPresetSheetsCoreEnUS from "@univerjs/preset-sheets-core/locales/en-US";
 
-// Univer's preset CSS isn't auto-imported by the JS — load the bundled
-// stylesheet ourselves or the UI renders unstyled (toolbar collapses,
-// context menus dump as plain text).
 import "@univerjs/presets/lib/styles/preset-sheets-core.css";
 
 import { parseCsv, serializeCsv } from "@/lib/csv";
+import type { SheetMeta } from "@/lib/mock-notes";
 
 const CELL_FONT_FAMILY =
   '"Geist", -apple-system, "Helvetica Neue", Arial, sans-serif';
+
+// Auto-fit tuning (px). Conservative defaults so columns feel sized to content
+// without ever taking over the viewport.
+const COL_MIN_PX = 56;
+const COL_MAX_PX = 280;
+const COL_CHAR_PX = 7; // approx width of one Geist character at default size
+const COL_PADDING_PX = 18;
 
 function isDarkMode(): boolean {
   if (typeof document === "undefined") return false;
   return document.documentElement.classList.contains("dark");
 }
 
-function csvToWorkbookSnapshot(csv: string): Partial<IWorkbookData> {
+/** Width for a column derived from its longest cell's text length. */
+function computeAutoFitWidths(rows: string[][]): Record<number, number> {
+  const widths: Record<number, number> = {};
+  let cols = 0;
+  for (const row of rows) if (row.length > cols) cols = row.length;
+  for (let c = 0; c < cols; c++) {
+    let max = 0;
+    for (const row of rows) {
+      const len = (row[c] ?? "").length;
+      if (len > max) max = len;
+    }
+    if (max === 0) continue;
+    const w = Math.min(
+      COL_MAX_PX,
+      Math.max(COL_MIN_PX, max * COL_CHAR_PX + COL_PADDING_PX),
+    );
+    widths[c] = w;
+  }
+  return widths;
+}
+
+function csvToWorkbookSnapshot(
+  csv: string,
+  meta: SheetMeta | undefined,
+): Partial<IWorkbookData> {
   const rows = parseCsv(csv);
+
   const cellData: Record<number, Record<number, { v: string }>> = {};
   for (let r = 0; r < rows.length; r++) {
     const cols: Record<number, { v: string }> = {};
@@ -36,8 +66,22 @@ function csvToWorkbookSnapshot(csv: string): Partial<IWorkbookData> {
     }
     if (Object.keys(cols).length > 0) cellData[r] = cols;
   }
+
+  // Apply saved widths if we have them, otherwise auto-fit from content.
+  const widths = meta?.columnWidths ?? computeAutoFitWidths(rows);
+  const columnData: Record<number, { w: number }> = {};
+  for (const [key, w] of Object.entries(widths)) columnData[Number(key)] = { w };
+
+  const rowData: Record<number, { h: number }> = {};
+  if (meta?.rowHeights) {
+    for (const [key, h] of Object.entries(meta.rowHeights)) {
+      rowData[Number(key)] = { h };
+    }
+  }
+
   const rowCount = Math.max(rows.length + 20, 50);
   const columnCount = Math.max((rows[0]?.length ?? 0) + 5, 10);
+
   return {
     id: "galexy-csv",
     name: "Sheet",
@@ -51,6 +95,8 @@ function csvToWorkbookSnapshot(csv: string): Partial<IWorkbookData> {
         id: "s1",
         name: "Sheet1",
         cellData,
+        columnData,
+        rowData,
         rowCount,
         columnCount,
       },
@@ -94,21 +140,61 @@ function workbookToCsv(snapshot: IWorkbookData): string {
   return rows.length === 0 ? "" : serializeCsv(rows);
 }
 
+function extractMeta(snapshot: IWorkbookData): SheetMeta {
+  const sheetId = snapshot.sheetOrder?.[0] ?? Object.keys(snapshot.sheets)[0];
+  const sheet = snapshot.sheets[sheetId];
+  const meta: SheetMeta = {};
+
+  const colMap = sheet?.columnData as
+    | Record<number, { w?: number } | undefined>
+    | undefined;
+  if (colMap) {
+    const widths: Record<number, number> = {};
+    for (const [c, data] of Object.entries(colMap)) {
+      if (data?.w != null) widths[Number(c)] = data.w;
+    }
+    if (Object.keys(widths).length > 0) meta.columnWidths = widths;
+  }
+
+  const rowMap = sheet?.rowData as
+    | Record<number, { h?: number } | undefined>
+    | undefined;
+  if (rowMap) {
+    const heights: Record<number, number> = {};
+    for (const [r, data] of Object.entries(rowMap)) {
+      if (data?.h != null) heights[Number(r)] = data.h;
+    }
+    if (Object.keys(heights).length > 0) meta.rowHeights = heights;
+  }
+
+  return meta;
+}
+
+function metasEqual(a: SheetMeta | undefined, b: SheetMeta): boolean {
+  return JSON.stringify(a ?? {}) === JSON.stringify(b);
+}
+
 type CsvSpreadsheetProps = {
   content: string;
+  meta?: SheetMeta;
   onChange: (content: string) => void;
+  onMetaChange?: (meta: SheetMeta) => void;
 };
 
 export default function CsvSpreadsheet({
   content,
+  meta,
   onChange,
+  onMetaChange,
 }: CsvSpreadsheetProps) {
   const hostRef = useRef<HTMLDivElement>(null);
 
-  // Latest onChange via ref so the create-effect stays mount-only.
+  // Keep latest callbacks in refs so the mount-only effect doesn't re-run.
   const onChangeRef = useRef(onChange);
+  const onMetaChangeRef = useRef(onMetaChange);
   useEffect(() => {
     onChangeRef.current = onChange;
+    onMetaChangeRef.current = onMetaChange;
   });
 
   useEffect(() => {
@@ -123,6 +209,7 @@ export default function CsvSpreadsheet({
     let cancelled = false;
     let cleanupHandlers: Array<() => void> = [];
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastSavedMeta: SheetMeta | undefined = meta;
 
     Promise.resolve().then(() => {
       if (cancelled) {
@@ -138,10 +225,6 @@ export default function CsvSpreadsheet({
         presets: [
           UniverSheetsCorePreset({
             container: inner,
-            // Intentionally omit workerURL — without a real worker entry the
-            // RPC plugin would spin trying to talk to nothing. Formulas that
-            // would have run in a worker won't compute; main-thread features
-            // (editing, formatting, drag, copy/paste) are unaffected.
             customFontFamily: [
               { value: "Geist", label: "Geist", category: "sans-serif" },
             ],
@@ -149,11 +232,8 @@ export default function CsvSpreadsheet({
         ],
       });
 
-      univerAPI.createWorkbook(csvToWorkbookSnapshot(content));
+      univerAPI.createWorkbook(csvToWorkbookSnapshot(content, meta));
 
-      // While the user is mid-edit the cell value isn't in the committed
-      // workbook snapshot. We track the in-progress value so debounced saves
-      // can patch it in, giving "save while typing" behaviour.
       let editing: { row: number; col: number; value: string } | null = null;
 
       const scheduleSave = () => {
@@ -162,6 +242,7 @@ export default function CsvSpreadsheet({
           const wb = univerAPI.getActiveWorkbook();
           if (!wb) return;
           const snap = wb.save();
+
           if (editing) {
             const sheetId =
               snap.sheetOrder?.[0] ?? Object.keys(snap.sheets)[0];
@@ -174,7 +255,16 @@ export default function CsvSpreadsheet({
               sheet.cellData[editing.row][editing.col] = { v: editing.value };
             }
           }
+
           onChangeRef.current(workbookToCsv(snap));
+
+          if (onMetaChangeRef.current) {
+            const nextMeta = extractMeta(snap);
+            if (!metasEqual(lastSavedMeta, nextMeta)) {
+              lastSavedMeta = nextMeta;
+              onMetaChangeRef.current(nextMeta);
+            }
+          }
         }, 300);
       };
 
@@ -197,34 +287,17 @@ export default function CsvSpreadsheet({
         univerAPI.Event.SheetEditEnded,
         () => {
           editing = null;
-          // After commit, the snapshot already includes the value — flush
-          // without the editing-cell patch.
           scheduleSave();
         },
       );
+      // CommandExecuted catches the rest: column resize, row resize, insert /
+      // delete rows/cols, paste, etc. The metasEqual check inside scheduleSave
+      // prevents a save when nothing actually changed.
+      const commandDisposer = univerAPI.addEvent(
+        univerAPI.Event.CommandExecuted,
+        scheduleSave,
+      );
 
-      // Cmd/Ctrl+Z (undo) and Cmd+Shift+Z / Ctrl+Y (redo). We only intercept
-      // when focus is outside Univer's container — when focused inside,
-      // Univer's own shortcut handlers take care of it (avoids double-undo).
-      const onKey = (e: KeyboardEvent) => {
-        const mod = e.metaKey || e.ctrlKey;
-        if (!mod) return;
-        const key = e.key.toLowerCase();
-        const isUndo = key === "z" && !e.shiftKey;
-        const isRedo = (key === "z" && e.shiftKey) || key === "y";
-        if (!isUndo && !isRedo) return;
-        if (inner.contains(document.activeElement)) return; // Univer handles
-        e.preventDefault();
-        if (isRedo) void univerAPI.redo();
-        else void univerAPI.undo();
-      };
-      window.addEventListener("keydown", onKey);
-
-      // De-duped theme sync: only react when the app's dark/light *actually*
-      // flips. Univer itself manipulates class names on elements (including
-      // possibly documentElement); without this guard the observer would
-      // call toggleDarkMode → Univer mutates the DOM → observer fires →
-      // infinite loop → freeze.
       let lastDark = isDarkMode();
       const themeObserver = new MutationObserver(() => {
         const next = isDarkMode();
@@ -237,12 +310,27 @@ export default function CsvSpreadsheet({
         attributeFilter: ["class"],
       });
 
+      const onKey = (e: KeyboardEvent) => {
+        const mod = e.metaKey || e.ctrlKey;
+        if (!mod) return;
+        const key = e.key.toLowerCase();
+        const isUndo = key === "z" && !e.shiftKey;
+        const isRedo = (key === "z" && e.shiftKey) || key === "y";
+        if (!isUndo && !isRedo) return;
+        if (inner.contains(document.activeElement)) return;
+        e.preventDefault();
+        if (isRedo) void univerAPI.redo();
+        else void univerAPI.undo();
+      };
+      window.addEventListener("keydown", onKey);
+
       cleanupHandlers = [
         () => window.removeEventListener("keydown", onKey),
         () => themeObserver.disconnect(),
         () => valueChangedDisposer.dispose(),
         () => editChangingDisposer.dispose(),
         () => editEndedDisposer.dispose(),
+        () => commandDisposer.dispose(),
         () => univer.dispose(),
       ];
     });
@@ -250,8 +338,6 @@ export default function CsvSpreadsheet({
     return () => {
       cancelled = true;
       if (saveTimer) clearTimeout(saveTimer);
-      // Defer to avoid synchronously unmounting Univer's React root inside
-      // the parent's commit (React 19 errors otherwise).
       setTimeout(() => {
         for (const handler of cleanupHandlers) {
           try {

@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# pdfjs assets — regenerated from node_modules on every install by
+# scripts/sync-pdfjs-assets.mjs (kept in lock-step with pdfjs-dist).
+/public/pdf.worker.min.mjs
+/public/pdfjs/

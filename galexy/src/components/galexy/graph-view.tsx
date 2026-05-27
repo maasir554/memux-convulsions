@@ -22,9 +22,12 @@ const FALLBACK: GraphColors = {
   pdf: "#ff8787",
   image: "#d0a3ff",
   folder: "#ffd43b",
+  user: "#ff9f1c",
+  workspace: "#a78bfa",
   active: "#ff6ac1",
   link: "#3b3f51",
   contains: "#ffd43b",
+  tree: "#6c7693",
   text: "#c8ccd4",
 };
 
@@ -40,12 +43,25 @@ function readColors(): GraphColors {
     pdf: get("--graph-pdf", FALLBACK.pdf),
     image: get("--graph-image", FALLBACK.image),
     folder: get("--graph-folder", FALLBACK.folder),
+    user: get("--graph-user", FALLBACK.user),
+    workspace: get("--graph-workspace", FALLBACK.workspace),
     active: get("--graph-active", FALLBACK.active),
     link: get("--graph-link", FALLBACK.link),
     contains: get("--graph-contains", FALLBACK.contains),
+    tree: get("--graph-tree", FALLBACK.tree),
     text: get("--graph-text", FALLBACK.text),
   };
 }
+
+// Synthetic tree-tier node IDs. The "__tier:" prefix won't collide with real
+// item IDs and is what force-graph-canvas's click guard checks via node.type.
+const USER_ID = "__tier:user";
+const WORKSPACE_ID = "__tier:workspace";
+
+// Display labels. The workspace name will become per-user / per-space data
+// once multi-workspace support lands; for now it's the app name.
+const USER_LABEL = "You";
+const WORKSPACE_LABEL = "galexy";
 
 type GraphViewProps = {
   items: Note[];
@@ -100,8 +116,9 @@ export function GraphView({
     .map((e) => `${e.source}>${e.target}:${e.kind}`)
     .join("|");
   const graphData = useMemo<{ nodes: GraphNode[]; links: GraphLink[] }>(
-    () => ({
-      nodes: items.map((item) => ({
+    () => {
+      // File + folder nodes — the existing graph layer.
+      const baseNodes: GraphNode[] = items.map((item) => ({
         id: item.id,
         name: item.title,
         type: item.type,
@@ -109,13 +126,55 @@ export function GraphView({
           item.type === "folder"
             ? Math.max(1, item.childIds?.length ?? 1)
             : 1 + (backlinkCount[item.id] ?? 0),
-      })),
-      links: edges.map((e) => ({
+      }));
+      const baseLinks: GraphLink[] = edges.map((e) => ({
         source: e.source,
         target: e.target,
         kind: e.kind,
-      })),
-    }),
+      }));
+
+      // Tier-tier synthetic backbone: User → Workspace → (folders + root files).
+      const tierNodes: GraphNode[] = [
+        {
+          id: USER_ID,
+          name: USER_LABEL,
+          type: "user",
+          val: 4,
+          fx: 0,
+          fy: -340,
+        },
+        {
+          id: WORKSPACE_ID,
+          name: WORKSPACE_LABEL,
+          type: "workspace",
+          val: 4,
+          fx: 0,
+          fy: -200,
+        },
+      ];
+
+      const tierLinks: GraphLink[] = [
+        { source: USER_ID, target: WORKSPACE_ID, kind: "tree" },
+      ];
+      // Anchor every top-level item (folders, plus root-level files that have
+      // no parent folder) to the workspace so nothing hangs in space.
+      for (const item of items) {
+        const isTopLevelFolder = item.type === "folder";
+        const isRootFile = item.type !== "folder" && item.folder === "";
+        if (isTopLevelFolder || isRootFile) {
+          tierLinks.push({
+            source: WORKSPACE_ID,
+            target: item.id,
+            kind: "tree",
+          });
+        }
+      }
+
+      return {
+        nodes: [...tierNodes, ...baseNodes],
+        links: [...tierLinks, ...baseLinks],
+      };
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [nodeSignature, edgeSignature],
   );

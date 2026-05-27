@@ -14,7 +14,12 @@ import { PdfViewer } from "@/components/galexy/viewers/pdf-viewer";
 import { ImageViewer } from "@/components/galexy/viewers/image-viewer";
 import { CsvViewer } from "@/components/galexy/viewers/csv-viewer";
 import { CodeView } from "@/components/galexy/viewers/code-view";
-import { toggleTaskInContent, type Note } from "@/lib/mock-notes";
+import {
+  toggleTaskInContent,
+  type Note,
+  type PdfAnnotation,
+  type SheetMeta,
+} from "@/lib/mock-notes";
 
 // Heavy spreadsheet UI: lazy and client-only.
 const CsvSpreadsheet = dynamic(
@@ -33,6 +38,8 @@ type EditorPaneProps = {
   onClose: (id: string) => void;
   onOpen: (id: string) => void;
   onChange: (id: string, content: string) => void;
+  onSheetMetaChange: (id: string, meta: SheetMeta) => void;
+  onPdfAnnotationsChange: (id: string, annotations: PdfAnnotation[]) => void;
   linkExists: (title: string) => boolean;
   onOpenWikiLink: (title: string) => void;
   onOpenTag: (tag: string) => void;
@@ -47,6 +54,8 @@ export function EditorPane({
   onClose,
   onOpen,
   onChange,
+  onSheetMetaChange,
+  onPdfAnnotationsChange,
   linkExists,
   onOpenWikiLink,
   onOpenTag,
@@ -98,6 +107,8 @@ export function EditorPane({
           folderChildren={folderChildren}
           onOpen={onOpen}
           onChange={onChange}
+          onSheetMetaChange={onSheetMetaChange}
+          onPdfAnnotationsChange={onPdfAnnotationsChange}
           linkExists={linkExists}
           onOpenWikiLink={onOpenWikiLink}
           onOpenTag={onOpenTag}
@@ -115,6 +126,8 @@ function Body({
   folderChildren,
   onOpen,
   onChange,
+  onSheetMetaChange,
+  onPdfAnnotationsChange,
   linkExists,
   onOpenWikiLink,
   onOpenTag,
@@ -124,6 +137,8 @@ function Body({
   folderChildren: Note[];
   onOpen: (id: string) => void;
   onChange: (id: string, content: string) => void;
+  onSheetMetaChange: (id: string, meta: SheetMeta) => void;
+  onPdfAnnotationsChange: (id: string, annotations: PdfAnnotation[]) => void;
   linkExists: (title: string) => boolean;
   onOpenWikiLink: (title: string) => void;
   onOpenTag: (tag: string) => void;
@@ -174,7 +189,9 @@ function Body({
           <CsvSpreadsheet
             key={item.id}
             content={item.content}
+            meta={item.sheetMeta}
             onChange={(content) => onChange(item.id, content)}
+            onMetaChange={(m) => onSheetMetaChange(item.id, m)}
           />
         </div>
       ) : (
@@ -190,7 +207,10 @@ function Body({
     case "pdf":
       return (
         <div className="min-h-0 flex-1">
-          <PdfViewer item={item} />
+          <PdfViewer
+            item={item}
+            onAnnotationsChange={(anns) => onPdfAnnotationsChange(item.id, anns)}
+          />
         </div>
       );
 

@@ -187,9 +187,12 @@
   --graph-pdf: #e03131;
   --graph-image: #9c36b5;
   --graph-folder: #f08c00;
+  --graph-user: #e8590c;
+  --graph-workspace: #7048e8;
   --graph-active: #d6336c;
   --graph-link: #ced4da;
   --graph-contains: #f08c00;
+  --graph-tree: #868e96;
   --graph-text: #495057;
 }
 .dark {
@@ -199,9 +202,12 @@
   --graph-pdf: #ff8787;
   --graph-image: #d0a3ff;
   --graph-folder: #ffd43b;
+  --graph-user: #ff9f1c;
+  --graph-workspace: #a78bfa;
   --graph-active: #ff6ac1;
   --graph-link: #3b3f51;
   --graph-contains: #ffd43b;
+  --graph-tree: #5b6480;
   --graph-text: #c8ccd4;
 }
 

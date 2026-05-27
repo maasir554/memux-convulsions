@@ -9,6 +9,27 @@ export type ItemType =
   | "image"
   | "folder";
 
+/** Per-sheet layout state (CSV spreadsheet column widths / row heights). */
+export type SheetMeta = {
+  columnWidths?: Record<number, number>;
+  rowHeights?: Record<number, number>;
+};
+
+/**
+ * A rectangular comment anchored to a PDF page. Coordinates are normalized
+ * to [0,1] relative to the page's natural size so they survive zoom changes.
+ */
+export type PdfAnnotation = {
+  id: string;
+  pageIndex: number; // 0-based
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  comment: string;
+  createdAt: string; // ISO
+};
+
 export type Note = {
   id: string;
   title: string;
@@ -19,9 +40,12 @@ export type Note = {
   tags: string[];
   updatedAt: string; // ISO date
   links?: string[]; // explicit outgoing links (item ids) for non-markdown files
-  src?: string; // public path for pdf / image / csv
+  src?: string; // public path for pre-shipped pdf / image / csv
+  blobKey?: string; // OPFS key for user-uploaded pdf / image binaries
   language?: string; // for code items
   childIds?: string[]; // for folder items
+  sheetMeta?: SheetMeta; // CSV viewer's persisted layout state
+  pdfAnnotations?: PdfAnnotation[]; // PDF viewer's box comments
 };
 
 // --- The vault (files) -------------------------------------------------------
@@ -235,31 +259,45 @@ export function buildLinkGraph(items: Item[]): LinkGraph {
 
 export const FOLDER_PREFIX = "folder:";
 
-/** Derive folder items from the distinct folders that contain files. */
-export function deriveFolders(notes: Note[]): Note[] {
+/**
+ * Derive folder items from the distinct folders that contain files, plus any
+ * explicit `extraNames` (so empty folders the user created still appear).
+ */
+export function deriveFolders(
+  notes: Note[],
+  extraNames: readonly string[] = [],
+): Note[] {
   const childrenByFolder = new Map<string, string[]>();
+  const allNames = new Set<string>(extraNames);
   for (const note of notes) {
     if (!note.folder) continue;
+    allNames.add(note.folder);
     const list = childrenByFolder.get(note.folder) ?? [];
     list.push(note.id);
     childrenByFolder.set(note.folder, list);
   }
-  return [...childrenByFolder.entries()].map(([name, childIds]) => ({
-    id: `${FOLDER_PREFIX}${name}`,
-    title: name,
-    folder: "",
-    type: "folder" as const,
-    summary: `Folder — ${childIds.length} item${childIds.length === 1 ? "" : "s"}.`,
-    content: "",
-    tags: [],
-    updatedAt: "",
-    childIds,
-  }));
+  return [...allNames].sort((a, b) => a.localeCompare(b)).map((name) => {
+    const childIds = childrenByFolder.get(name) ?? [];
+    return {
+      id: `${FOLDER_PREFIX}${name}`,
+      title: name,
+      folder: "",
+      type: "folder" as const,
+      summary: `Folder — ${childIds.length} item${childIds.length === 1 ? "" : "s"}.`,
+      content: "",
+      tags: [],
+      updatedAt: "",
+      childIds,
+    };
+  });
 }
 
 /** Files plus derived folder items (everything that can be a graph node). */
-export function buildItems(notes: Note[]): Note[] {
-  return [...notes, ...deriveFolders(notes)];
+export function buildItems(
+  notes: Note[],
+  extraFolderNames: readonly string[] = [],
+): Note[] {
+  return [...notes, ...deriveFolders(notes, extraFolderNames)];
 }
 
 // --- Link parsing & graph ----------------------------------------------------
@@ -371,9 +409,16 @@ export function toggleTaskInContent(content: string, lineIndex: number): string 
 
 export type VaultTree = { folder: string; notes: Note[] }[];
 
-/** Group files by folder for the file explorer (root folder first). */
-export function buildVaultTree(notes: Note[]): VaultTree {
+/**
+ * Group files by folder for the file explorer (root folder first).
+ * `extraFolderNames` ensures empty folders still show up as collapsible groups.
+ */
+export function buildVaultTree(
+  notes: Note[],
+  extraFolderNames: readonly string[] = [],
+): VaultTree {
   const byFolder = new Map<string, Note[]>();
+  for (const name of extraFolderNames) byFolder.set(name, []);
   for (const note of notes) {
     const list = byFolder.get(note.folder) ?? [];
     list.push(note);

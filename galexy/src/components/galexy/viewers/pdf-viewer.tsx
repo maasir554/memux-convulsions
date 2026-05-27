@@ -1,17 +1,28 @@
 "use client";
 
-import { ViewerFallback } from "@/components/galexy/viewers/viewer-fallback";
-import type { Note } from "@/lib/mock-notes";
+import dynamic from "next/dynamic";
 
-export function PdfViewer({ item }: { item: Note }) {
-  if (!item.src) {
-    return <ViewerFallback label="No PDF source set for this file." />;
-  }
+import { ViewerFallback } from "@/components/galexy/viewers/viewer-fallback";
+import type { Note, PdfAnnotation } from "@/lib/mock-notes";
+
+// The full viewer pulls in pdfjs (which can't be SSR'd), so defer the heavy
+// implementation to a client-only dynamic import.
+const PdfViewerImpl = dynamic(
+  () => import("@/components/galexy/viewers/pdf-viewer-impl"),
+  {
+    ssr: false,
+    loading: () => <ViewerFallback label="Loading PDF viewer…" />,
+  },
+);
+
+export function PdfViewer({
+  item,
+  onAnnotationsChange,
+}: {
+  item: Note;
+  onAnnotationsChange?: (annotations: PdfAnnotation[]) => void;
+}) {
   return (
-    <iframe
-      src={item.src}
-      title={item.title}
-      className="h-full w-full border-0 bg-white"
-    />
+    <PdfViewerImpl item={item} onAnnotationsChange={onAnnotationsChange} />
   );
 }

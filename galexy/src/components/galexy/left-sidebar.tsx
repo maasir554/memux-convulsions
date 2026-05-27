@@ -1,24 +1,60 @@
 "use client";
 
-import { Search } from "lucide-react";
+import { useState } from "react";
+import {
+  FilePlus,
+  FolderPlus,
+  Search,
+  Sheet,
+  SquareCode,
+} from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { FileExplorer } from "@/components/galexy/file-explorer";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import {
+  FileExplorer,
+  type CreateKind,
+  type CreatingState,
+} from "@/components/galexy/file-explorer";
 import { GraphView } from "@/components/galexy/graph-view";
 import type { LeftView } from "@/components/galexy/ribbon";
 import type { GraphEdge, Note } from "@/lib/mock-notes";
+import type { UploadCategory } from "@/components/galexy/use-vault";
+
+type CreateNoteInput = {
+  type: "markdown" | "code" | "csv";
+  title: string;
+  folder?: string;
+  language?: string;
+};
 
 type LeftSidebarProps = {
   view: LeftView;
   notes: Note[];
   items: Note[];
+  folderNames: string[];
   activeId: string;
   onOpen: (id: string) => void;
   query: string;
   onQueryChange: (value: string) => void;
   edges: GraphEdge[];
   backlinkCount: Record<string, number>;
+  onCreateNote: (input: CreateNoteInput) => void | Promise<void>;
+  onCreateFolder: (name: string) => void | Promise<void>;
+  onUploadFiles: (
+    category: UploadCategory,
+    folder: string,
+    files: File[],
+  ) => void | Promise<void>;
+  onDeleteItem: (id: string) => void;
+  onDeleteFolder: (name: string) => void;
 };
 
 const VIEW_TITLES: Record<LeftView, string> = {
@@ -27,17 +63,56 @@ const VIEW_TITLES: Record<LeftView, string> = {
   graph: "Graph view",
 };
 
+const ROOT_TOOLBAR_BUTTONS: {
+  kind: CreateKind;
+  label: string;
+  Icon: typeof FilePlus;
+}[] = [
+  { kind: "markdown", label: "New note (root)", Icon: FilePlus },
+  { kind: "code", label: "New code file (root)", Icon: SquareCode },
+  { kind: "csv", label: "New sheet (root)", Icon: Sheet },
+  { kind: "folder", label: "New folder (root)", Icon: FolderPlus },
+];
+
+/** Best-effort filename parsing: strip extension, infer code language. */
+function parseName(
+  raw: string,
+  kind: CreateKind,
+): { title: string; language?: string } {
+  const trimmed = raw.trim();
+  if (kind === "markdown") {
+    return { title: trimmed.replace(/\.md$/i, "") };
+  }
+  if (kind === "csv") {
+    return { title: trimmed.replace(/\.csv$/i, "") };
+  }
+  if (kind === "code") {
+    const m = trimmed.match(/^(.+)\.(ts|tsx|js|jsx|py|rs|go|sh|json|css)$/i);
+    if (m) return { title: m[1], language: m[2].toLowerCase() };
+    return { title: trimmed };
+  }
+  return { title: trimmed };
+}
+
 export function LeftSidebar({
   view,
   notes,
   items,
+  folderNames,
   activeId,
   onOpen,
   query,
   onQueryChange,
   edges,
   backlinkCount,
+  onCreateNote,
+  onCreateFolder,
+  onUploadFiles,
+  onDeleteItem,
+  onDeleteFolder,
 }: LeftSidebarProps) {
+  const [creating, setCreating] = useState<CreatingState | null>(null);
+
   const results =
     query.trim().length > 0
       ? notes.filter((note) => {
@@ -49,15 +124,92 @@ export function LeftSidebar({
         })
       : [];
 
+  function startCreate(kind: CreateKind, folder: string) {
+    setCreating({ kind, folder });
+  }
+
+  function handleCommit(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || !creating) {
+      setCreating(null);
+      return;
+    }
+    if (creating.kind === "folder") {
+      void onCreateFolder(trimmed);
+    } else {
+      const { title, language } = parseName(trimmed, creating.kind);
+      if (title) {
+        void onCreateNote({
+          type: creating.kind,
+          title,
+          folder: creating.folder,
+          language,
+        });
+      }
+    }
+    setCreating(null);
+  }
+
+  function handleUpload(
+    category: UploadCategory,
+    folder: string,
+    files: File[],
+  ) {
+    void onUploadFiles(category, folder, files);
+  }
+
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex h-9 shrink-0 items-center border-b px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-        {VIEW_TITLES[view]}
+      <div className="flex h-9 shrink-0 items-center justify-between border-b pr-1 pl-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        <span>{VIEW_TITLES[view]}</span>
+        {view === "files" && (
+          <div className="flex items-center gap-0.5">
+            {ROOT_TOOLBAR_BUTTONS.map(({ kind, label, Icon }) => (
+              <Tooltip key={kind}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      "size-6 text-muted-foreground hover:text-foreground",
+                      creating?.kind === kind &&
+                        creating.folder === "" &&
+                        "bg-sidebar-accent text-foreground",
+                    )}
+                    onClick={() =>
+                      setCreating((current) =>
+                        current?.kind === kind && current.folder === ""
+                          ? null
+                          : { kind, folder: "" },
+                      )
+                    }
+                    aria-label={label}
+                  >
+                    <Icon className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{label}</TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
+        )}
       </div>
 
       {view === "files" && (
         <ScrollArea className="flex-1">
-          <FileExplorer notes={notes} activeId={activeId} onOpen={onOpen} />
+          <FileExplorer
+            notes={notes}
+            folderNames={folderNames}
+            activeId={activeId}
+            onOpen={onOpen}
+            creating={creating}
+            onCommit={handleCommit}
+            onCancel={() => setCreating(null)}
+            onStartCreate={startCreate}
+            onUpload={handleUpload}
+            onDeleteItem={onDeleteItem}
+            onDeleteFolder={onDeleteFolder}
+          />
         </ScrollArea>
       )}
 

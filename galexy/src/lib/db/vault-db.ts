@@ -2,10 +2,24 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { and, eq, sql } from "drizzle-orm";
 
-import { ITEMS_DDL, items, type DbItem, type NewDbItem } from "@/lib/db/schema";
-import { NOTES, type ItemType, type Note } from "@/lib/mock-notes";
+import {
+  FOLDERS_CREATE,
+  ITEMS_CREATE,
+  ITEMS_MIGRATIONS,
+  folders,
+  items,
+  type DbItem,
+  type NewDbItem,
+} from "@/lib/db/schema";
+import {
+  NOTES,
+  type ItemType,
+  type Note,
+  type PdfAnnotation,
+  type SheetMeta,
+} from "@/lib/mock-notes";
 
-type Schema = { items: typeof items };
+type Schema = { items: typeof items; folders: typeof folders };
 export type VaultDb = PgliteDatabase<Schema>;
 
 let dbPromise: Promise<VaultDb> | null = null;
@@ -20,8 +34,18 @@ async function create(): Promise<VaultDb> {
   const client = await PGlite.create("idb://galexy", {
     relaxedDurability: true,
   });
-  await client.exec(ITEMS_DDL);
-  const db = drizzle(client, { schema: { items } });
+  await client.exec(ITEMS_CREATE);
+  await client.exec(FOLDERS_CREATE);
+  // Run each migration in its own exec so one statement can't shadow the next
+  // (and existing DBs created before a column was added still pick it up).
+  for (const stmt of ITEMS_MIGRATIONS) {
+    try {
+      await client.exec(stmt);
+    } catch (err) {
+      console.warn("[vault] migration failed:", stmt, err);
+    }
+  }
+  const db = drizzle(client, { schema: { items, folders } });
   await seedIfEmpty(db);
   await applyContentUpgrades(db);
   return db;
@@ -64,7 +88,9 @@ function noteToRow(note: Note): NewDbItem {
     links: note.links ?? [],
     language: note.language ?? null,
     src: note.src ?? null,
-    blobKey: null,
+    blobKey: note.blobKey ?? null,
+    sheetMeta: note.sheetMeta ?? null,
+    pdfAnnotations: note.pdfAnnotations ?? null,
     updatedAt: note.updatedAt ? new Date(note.updatedAt) : new Date(),
   };
 }
@@ -81,6 +107,9 @@ function rowToNote(row: DbItem): Note {
     links: row.links,
     language: row.language ?? undefined,
     src: row.src ?? undefined,
+    blobKey: row.blobKey ?? undefined,
+    sheetMeta: row.sheetMeta ?? undefined,
+    pdfAnnotations: row.pdfAnnotations ?? undefined,
     updatedAt: row.updatedAt.toISOString().slice(0, 10),
   };
 }
@@ -101,4 +130,62 @@ export async function persistContent(
     .update(items)
     .set({ content, updatedAt: new Date() })
     .where(eq(items.id, id));
+}
+
+export async function persistSheetMeta(
+  db: VaultDb,
+  id: string,
+  sheetMeta: SheetMeta,
+): Promise<void> {
+  await db
+    .update(items)
+    .set({ sheetMeta, updatedAt: new Date() })
+    .where(eq(items.id, id));
+}
+
+export async function persistPdfAnnotations(
+  db: VaultDb,
+  id: string,
+  pdfAnnotations: PdfAnnotation[],
+): Promise<void> {
+  await db
+    .update(items)
+    .set({ pdfAnnotations, updatedAt: new Date() })
+    .where(eq(items.id, id));
+}
+
+export async function insertItem(db: VaultDb, note: Note): Promise<void> {
+  await db.insert(items).values(noteToRow(note));
+}
+
+export async function loadAllFolders(db: VaultDb): Promise<string[]> {
+  const rows = await db.select({ name: folders.name }).from(folders);
+  return rows.map((r) => r.name);
+}
+
+export async function insertFolder(db: VaultDb, name: string): Promise<void> {
+  // ON CONFLICT DO NOTHING so re-creating an existing folder is a no-op.
+  await db.insert(folders).values({ name }).onConflictDoNothing();
+}
+
+/**
+ * Delete an item and return its previous blob_key (if any) so the caller can
+ * also clean up the OPFS blob. Returns null if the row didn't exist.
+ */
+export async function deleteItem(
+  db: VaultDb,
+  id: string,
+): Promise<string | null> {
+  const rows = await db
+    .delete(items)
+    .where(eq(items.id, id))
+    .returning({ blobKey: items.blobKey });
+  return rows[0]?.blobKey ?? null;
+}
+
+export async function deleteFolderName(
+  db: VaultDb,
+  name: string,
+): Promise<void> {
+  await db.delete(folders).where(eq(folders.name, name));
 }
