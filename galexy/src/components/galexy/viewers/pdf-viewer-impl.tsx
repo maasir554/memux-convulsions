@@ -45,7 +45,7 @@ if (typeof window !== "undefined") {
 }
 
 const MIN_BOX = 0.01; // normalized — discard sub-1% drags as accidental clicks
-const MIN_SCALE = 0.5;
+const MIN_SCALE = 0.25;
 const MAX_SCALE = 3;
 const SCALE_STEP = 0.1;
 
@@ -58,6 +58,14 @@ const DEFAULT_PAGE_HEIGHT = 792;
 // How many pages to pre-mount around the visible window. Higher = smoother
 // scroll, more memory. 3 above + 3 below is plenty for a smooth wheel-scroll.
 const PREMOUNT_RADIUS = 3;
+
+// Augment HTMLDivElement so we can stash a per-node wheel handler reference
+// on it (used by the scroll-container callback ref to clean up on unmount).
+declare global {
+  interface HTMLDivElement {
+    __pinchHandler__?: (e: WheelEvent) => void;
+  }
+}
 
 /**
  * Auxiliary asset URLs for pdfjs. Copied into public/pdfjs/ at install time
@@ -140,6 +148,35 @@ export default function PdfViewerImpl({ item, onAnnotationsChange }: Props) {
   // IntersectionObserver can resolve the most-visible page.
   const pageNodes = useRef(new Map<number, HTMLDivElement>());
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Callback ref for the scroll container. Synchronously attaches a
+   * non-passive wheel listener the moment React mounts the node, so we can
+   * actually preventDefault() the browser's native ctrl+wheel zoom. (React
+   * 19's onWheelCapture is passive by design, so doing the same thing there
+   * just logs "Unable to preventDefault inside passive event listener".)
+   */
+  const setScrollContainer = useCallback((node: HTMLDivElement | null) => {
+    const prev = scrollRef.current;
+    if (prev && prev !== node) {
+      const handler = prev.__pinchHandler__;
+      if (handler) prev.removeEventListener("wheel", handler, { capture: true });
+      delete prev.__pinchHandler__;
+    }
+    scrollRef.current = node;
+    if (!node) return;
+    const handler = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const factor = Math.exp(-e.deltaY * 0.01);
+      setScale((s) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s * factor)));
+    };
+    node.addEventListener("wheel", handler, {
+      passive: false,
+      capture: true,
+    });
+    node.__pinchHandler__ = handler;
+  }, []);
 
   // scaleRef tracks the latest scale for imperative event handlers attached
   // via addEventListener (reading `scale` directly would close over a stale
@@ -281,26 +318,16 @@ export default function PdfViewerImpl({ item, onAnnotationsChange }: Props) {
   }, [numPages]);
 
   /**
-   * Pinch-to-zoom on the PDF.
+   * Pinch-to-zoom via touch + Safari gesture events.
    *
-   * Three input paths, because no two browsers agree on how trackpad
-   * gestures arrive:
-   *
-   *   - `wheel` + `ctrlKey: true`  — Chrome / Firefox / Edge trackpad pinch
-   *     and also plain Ctrl+scroll (so a mouse user can zoom too).
-   *   - `gesturestart/change/end`  — Safari's WebKit-only gesture events for
-   *     trackpad pinch (Chrome / Firefox don't dispatch them, but listening
-   *     is cheap).
-   *   - `touchstart/move/end`      — touchscreens (iPad, Android, touch
-   *     laptops). Two-finger distance ratio drives the scale.
-   *
-   * The wheel listener is attached at `window` level with `capture: true` so
-   * react-pdf's canvases / text-layer divs can't swallow the event before we
-   * see it. We filter to events whose target is inside the PDF scroll area,
-   * so editor zoom in other parts of the page is unaffected.
-   *
-   * All listeners are `{ passive: false }` where they need to preventDefault
-   * the browser's native page zoom.
+   * The wheel-based path (trackpad pinch and Ctrl+scroll) lives on the
+   * scroll container's `onWheelCapture` JSX prop instead of in this effect.
+   * Under React 19's event delegation, raw `addEventListener("wheel", …)`
+   * on window / document / the scroll element itself does NOT fire wheel
+   * events when the multi-page virtualized tree is mounted — only React's
+   * synthetic event system does. We confirmed this with a four-way
+   * diagnostic. Putting the wheel handler directly in JSX sidesteps the
+   * discrepancy entirely.
    */
   useEffect(() => {
     const el = scrollRef.current;
@@ -308,43 +335,14 @@ export default function PdfViewerImpl({ item, onAnnotationsChange }: Props) {
     const clamp = (s: number) =>
       Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
 
-    const isOverViewer = (target: EventTarget | null): boolean =>
-      target instanceof Node && el.contains(target);
-
-    const onWheel = (e: WheelEvent) => {
-      // Diagnostic — every wheel event at the window-capture level, so we
-      // can tell "no events arriving" from "events arriving but missing
-      // ctrlKey". Strip once root cause is identified.
-      console.log("[pdf] wheel", {
-        ctrlKey: e.ctrlKey,
-        metaKey: e.metaKey,
-        deltaY: e.deltaY,
-        overViewer: isOverViewer(e.target),
-        targetTag: e.target instanceof Element ? e.target.tagName : "?",
-      });
-      if (!e.ctrlKey) return;
-      if (!isOverViewer(e.target)) return;
-      e.preventDefault();
-      // deltaY < 0 → pinch-out / zoom-in. The 0.01 coefficient makes the
-      // exponential feel close to native (1px pinch ≈ 1% zoom).
-      const factor = Math.exp(-e.deltaY * 0.01);
-      setScale((prev) => {
-        const next = clamp(prev * factor);
-        console.log("[pdf] scale", prev.toFixed(3), "→", next.toFixed(3));
-        return next;
-      });
-    };
-
-    // Safari only. The event type is non-standard so we use string keys.
+    // Safari trackpad pinch — WebKit-only gesture events.
     type GestureEvent = Event & { scale: number };
     let gestureStartScale = 1;
     const onGestureStart = (e: Event) => {
-      if (!isOverViewer(e.target)) return;
       e.preventDefault();
       gestureStartScale = scaleRef.current;
     };
     const onGestureChange = (e: Event) => {
-      if (!isOverViewer(e.target)) return;
       e.preventDefault();
       const s = (e as GestureEvent).scale;
       if (typeof s === "number" && Number.isFinite(s)) {
@@ -352,6 +350,7 @@ export default function PdfViewerImpl({ item, onAnnotationsChange }: Props) {
       }
     };
 
+    // Touchscreen pinch (iPad, Android, touch laptops).
     let pinchStartDist = 0;
     let pinchStartScale = 1;
     const touchDistance = (touches: TouchList): number => {
@@ -375,16 +374,6 @@ export default function PdfViewerImpl({ item, onAnnotationsChange }: Props) {
       if (e.touches.length < 2) pinchStartDist = 0;
     };
 
-    // Attach the wheel listener directly to the scroll container with
-    // capture: true. Window-level was eaten by something multi-page
-    // specific; the scroll element is where wheels go anyway.
-    el.addEventListener("wheel", onWheel, {
-      passive: false,
-      capture: true,
-    });
-    // One-shot diagnostic so you can verify in the browser console that the
-    // pinch listeners actually mounted. Remove once confirmed working.
-    console.log("[pdf] pinch listeners attached");
     el.addEventListener("gesturestart", onGestureStart, { passive: false });
     el.addEventListener("gesturechange", onGestureChange, { passive: false });
     el.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -392,7 +381,6 @@ export default function PdfViewerImpl({ item, onAnnotationsChange }: Props) {
     el.addEventListener("touchend", onTouchEnd, { passive: true });
     el.addEventListener("touchcancel", onTouchEnd, { passive: true });
     return () => {
-      window.removeEventListener("wheel", onWheel, { capture: true });
       el.removeEventListener("gesturestart", onGestureStart);
       el.removeEventListener("gesturechange", onGestureChange);
       el.removeEventListener("touchstart", onTouchStart);
@@ -610,7 +598,11 @@ export default function PdfViewerImpl({ item, onAnnotationsChange }: Props) {
 
       {/* Pages */}
       <div
-        ref={scrollRef}
+        ref={setScrollContainer}
+        // touch-action: none disables the browser's native page-zoom for
+        // trackpad pinch, so even if the wheel handler somehow misses, the
+        // gesture won't cause the whole UI to zoom.
+        style={{ touchAction: "none" }}
         className={cn(
           // gap-6 between pages so each one reads as a distinct sheet against
           // the muted backdrop; py-6 keeps the same breathing room above the
