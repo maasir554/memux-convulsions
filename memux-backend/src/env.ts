@@ -9,6 +9,9 @@ export interface WorkerEnv {
   // D1
   DB: D1Database;
 
+  // Durable Objects (Phase 4)
+  TEAM_ROOM: DurableObjectNamespace;
+
   // Vars (wrangler.jsonc → vars)
   BETTER_AUTH_URL: string;
   TRUSTED_ORIGINS: string;

@@ -348,6 +348,84 @@ teams.post("/join", async (c) => {
   return c.json({ team: { id: t!.id, name: t!.name }, alreadyMember: false });
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// TeamRoom (Phase 4) — forward to the per-team Durable Object.
+//
+// The DO is identified by `idFromName(teamId)` so we always hit the same
+// instance for a given team. Auth + membership check happen here in the
+// Worker; the DO trusts the headers we attach.
+// ─────────────────────────────────────────────────────────────────────────
+
+function teamRoomStub(env: WorkerEnv, teamId: string) {
+  return env.TEAM_ROOM.get(env.TEAM_ROOM.idFromName(teamId));
+}
+
+function withUserHeaders(headers: Headers, user: { id: string; name: string; image: string | null }) {
+  const h = new Headers(headers);
+  h.set("x-memux-user-id", user.id);
+  h.set("x-memux-user-name", user.name);
+  if (user.image) h.set("x-memux-user-image", user.image);
+  return h;
+}
+
+// GET /api/teams/:id/ws — WebSocket upgrade into the TeamRoom DO.
+teams.get("/:id/ws", async (c) => {
+  const me = c.var.user;
+  const teamId = c.req.param("id");
+  const role = await getMembership(c.env, teamId, me.id);
+  if (!role) return c.json({ error: "not a member" }, 404);
+  if (c.req.header("Upgrade") !== "websocket") {
+    return c.text("expected websocket upgrade", 426);
+  }
+  const stub = teamRoomStub(c.env, teamId);
+  return stub.fetch(
+    new Request("https://do/ws", {
+      method: "GET",
+      headers: withUserHeaders(c.req.raw.headers, me),
+    }),
+  );
+});
+
+// GET /api/teams/:id/messages?before=<msgKey>&limit=50 — history pagination.
+teams.get("/:id/messages", async (c) => {
+  const me = c.var.user;
+  const teamId = c.req.param("id");
+  const role = await getMembership(c.env, teamId, me.id);
+  if (!role) return c.json({ error: "not a member" }, 404);
+
+  const params = new URLSearchParams();
+  const before = c.req.query("before");
+  const limit = c.req.query("limit");
+  if (before) params.set("before", before);
+  if (limit) params.set("limit", limit);
+
+  const stub = teamRoomStub(c.env, teamId);
+  return stub.fetch(
+    new Request(`https://do/messages?${params.toString()}`, {
+      method: "GET",
+      headers: withUserHeaders(c.req.raw.headers, me),
+    }),
+  );
+});
+
+// POST /api/teams/:id/messages { body } — REST fallback for sending.
+// (Live chat uses the WebSocket; this is for scripts and tests.)
+teams.post("/:id/messages", async (c) => {
+  const me = c.var.user;
+  const teamId = c.req.param("id");
+  const role = await getMembership(c.env, teamId, me.id);
+  if (!role) return c.json({ error: "not a member" }, 404);
+
+  const stub = teamRoomStub(c.env, teamId);
+  return stub.fetch(
+    new Request("https://do/messages", {
+      method: "POST",
+      headers: withUserHeaders(c.req.raw.headers, me),
+      body: c.req.raw.body,
+    }),
+  );
+});
+
 // silence the unused import warning until member-management routes land
 void or;
 void isNull;

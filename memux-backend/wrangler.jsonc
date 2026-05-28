@@ -22,8 +22,27 @@
   "vars": {
     "BETTER_AUTH_URL": "http://localhost:8787",
     "TRUSTED_ORIGINS": "http://localhost:3000"
-  }
+  },
 
-  // Durable Objects land in Phase 4 (TeamRoom). Keeping the block out of
-  // wrangler.jsonc until then so deploys don't fail on a missing class.
+  // One DO instance per team. id derived from teamId via idFromName().
+  // Storage: SQLite-backed (modern default, 10 GB cap, richer than KV).
+  // KV-style storage.put/get/list works on top of SQLite-backed DOs too,
+  // so existing message code stays simple.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TEAM_ROOM",
+        "class_name": "TeamRoom"
+      }
+    ]
+  },
+
+  // Migration tag must be unique forever. Use "v1" for the first batch of
+  // DO classes; subsequent additions/removals get v2, v3, etc.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TeamRoom"]
+    }
+  ]
 }

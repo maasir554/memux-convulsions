@@ -16,6 +16,10 @@ import { createAuth } from "./auth";
 import type { WorkerEnv } from "./env";
 import teamsRouter from "./routes/teams";
 
+// Durable Object class must be exported from the Worker entry so wrangler
+// can wire it to its binding.
+export { TeamRoom } from "./do/team-room";
+
 type Bindings = WorkerEnv;
 type Variables = {
   user: { id: string; email: string; name: string; image: string | null };
