@@ -45,10 +45,26 @@ import {
   X,
 } from "lucide-react";
 
+import dynamic from "next/dynamic";
+
 import { useSession } from "@/lib/auth/client";
 import { attachmentUrl, teamsApi, ApiError } from "@/lib/teams/api";
 import { useTeamRoom } from "@/lib/teams/use-team-room";
 import { AttachmentModal } from "@/components/teams/attachment-modal";
+
+// Lazy-load: react-pdf is ~600KB minified; we only ever need it when the
+// chat actually contains a PDF attachment.
+const PdfThumb = dynamic(
+  () => import("@/components/teams/pdf-thumb").then((m) => m.PdfThumb),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex w-56 items-center gap-2 rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" /> Loading PDF…
+      </div>
+    ),
+  },
+);
 import type {
   ChatAttachment,
   ChatMessage,
@@ -373,7 +389,7 @@ function MessageList({
       className="flex min-w-0 flex-1 flex-col overflow-y-auto px-4 py-3"
     >
       {/* Width cap — keep messages readable on a wide monitor. */}
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-0.5">
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-0.5">
         {messages.length === 0 ? (
           <div className="my-auto text-center text-xs text-muted-foreground">
             No messages yet. Say hi.
@@ -536,6 +552,10 @@ function AttachmentTile({
 }) {
   const url = attachmentUrl(attachment.key);
   const isImage = attachment.contentType.startsWith("image/");
+  const isPdf =
+    attachment.contentType === "application/pdf" ||
+    attachment.filename.toLowerCase().endsWith(".pdf");
+
   if (isImage) {
     return (
       <button
@@ -555,6 +575,20 @@ function AttachmentTile({
       </button>
     );
   }
+
+  // PDFs get a real first-page poster — the heavy react-pdf chunk only
+  // loads when there's a PDF in view (lazy module).
+  if (isPdf) {
+    return (
+      <PdfThumb
+        url={url}
+        filename={attachment.filename}
+        sizeLabel={formatBytes(attachment.size)}
+        onClick={onClick}
+      />
+    );
+  }
+
   return (
     <button
       type="button"
@@ -728,12 +762,16 @@ const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
     }
   }, [canSend, value, ready, onSend]);
 
-  // Auto-grow up to 8 lines.
+  // Auto-grow up to 8 lines. Also derive multi-line state here so the
+  // render path never reaches for the ref synchronously.
+  const [isMultiLine, setIsMultiLine] = useState(false);
   useEffect(() => {
     const ta = taRef.current;
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    const next = Math.min(ta.scrollHeight, 200);
+    ta.style.height = `${next}px`;
+    setIsMultiLine(next > 44);
   }, [value]);
 
   const handleFiles = useCallback(
@@ -779,8 +817,8 @@ const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
 
   return (
     <div className="shrink-0 border-t bg-background p-3">
-      {/* Width-cap the composer to match the message column. */}
-      <div className="mx-auto w-full max-w-3xl">
+      {/* Narrower than the message column — chat bars read better tight. */}
+      <div className="mx-auto w-full max-w-2xl">
         {pending.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {pending.map((p) => (
@@ -792,18 +830,18 @@ const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
             ))}
           </div>
         )}
-        <div className="flex items-end gap-2">
-          <Button
+        <div className="flex items-center gap-2">
+          {/* Circular attach button */}
+          <button
             type="button"
-            size="icon"
-            variant="ghost"
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled}
             title="Attach files"
             aria-label="Attach files"
+            className="flex size-9 shrink-0 items-center justify-center rounded-full border bg-card text-foreground/80 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
           >
             <Paperclip className="size-4" />
-          </Button>
+          </button>
           <input
             ref={fileInputRef}
             type="file"
@@ -814,6 +852,7 @@ const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
               e.target.value = ""; // allow re-selecting the same file
             }}
           />
+          {/* Capsule input — flex item, expands with content */}
           <textarea
             ref={taRef}
             value={value}
@@ -824,16 +863,31 @@ const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
                 submit();
               }
             }}
-            placeholder={disabled ? "Connecting…" : "Type a message…  (Enter to send)"}
+            placeholder={disabled ? "Connecting…" : "Type a message…"}
             disabled={disabled}
             rows={1}
-            className="flex-1 resize-none rounded-md border bg-card px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring/50 disabled:opacity-60"
+            className={cn(
+              "flex-1 resize-none border bg-card px-4 py-2 text-sm leading-5 outline-none transition-[border-radius] focus:ring-1 focus:ring-ring/50 disabled:opacity-60",
+              isMultiLine ? "rounded-2xl" : "rounded-full",
+            )}
           />
-          <Button onClick={submit} disabled={!canSend}>
-            {hasUploading ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
-          </Button>
+          {/* Circular send button — primary fill */}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSend}
+            title="Send"
+            aria-label="Send"
+            className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+          >
+            {hasUploading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Send className="size-4 -translate-x-px translate-y-px" />
+            )}
+          </button>
         </div>
-        <div className="mt-1 text-[10px] text-muted-foreground">
+        <div className="mt-1.5 text-center text-[10px] text-muted-foreground">
           Enter sends · Shift+Enter for newline · drag &amp; drop files anywhere · 25 MB max
         </div>
       </div>
