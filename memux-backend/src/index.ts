@@ -14,6 +14,7 @@ import { cors } from "hono/cors";
 
 import { createAuth } from "./auth";
 import type { WorkerEnv } from "./env";
+import teamsRouter from "./routes/teams";
 
 type Bindings = WorkerEnv;
 type Variables = {
@@ -53,5 +54,9 @@ app.get("/api/me", async (c) => {
   if (!session) return c.json({ user: null }, 401);
   return c.json({ user: session.user });
 });
+
+// Teams CRUD (Phase 3). All routes inside teamsRouter require a session
+// via the requireUser middleware — see src/middleware/auth.ts.
+app.route("/api/teams", teamsRouter);
 
 export default app;
