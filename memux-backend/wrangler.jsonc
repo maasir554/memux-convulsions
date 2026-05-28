@@ -37,6 +37,16 @@
     ]
   },
 
+  // R2 for chat attachments. Free tier covers 10 GB storage + 10M Class A
+  // ops + 10M Class B ops per month, well above what a small chat app
+  // needs. Run `wrangler r2 bucket create memux-attachments` first.
+  "r2_buckets": [
+    {
+      "binding": "MEMUX_ATTACHMENTS",
+      "bucket_name": "memux-attachments"
+    }
+  ],
+
   // Migration tag must be unique forever. Use "v1" for the first batch of
   // DO classes; subsequent additions/removals get v2, v3, etc.
   "migrations": [

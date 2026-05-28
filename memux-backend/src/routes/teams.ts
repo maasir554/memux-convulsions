@@ -22,6 +22,7 @@ import { team, teamInvite, teamMember, user } from "../db/schema";
 import { getDb } from "../lib/db";
 import { genId, genInviteCode } from "../lib/ids";
 import { requireUser, type AuthedVariables } from "../middleware/auth";
+import { teamAttachmentsRouter } from "./attachments";
 import type { WorkerEnv } from "../env";
 
 const teams = new Hono<{ Bindings: WorkerEnv; Variables: AuthedVariables }>();
@@ -425,6 +426,13 @@ teams.post("/:id/messages", async (c) => {
     }),
   );
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Attachments (Phase 4b) — mounted as a sub-router.
+// POST /api/teams/:id/attachments  (multipart "file" → { attachment })
+// ─────────────────────────────────────────────────────────────────────────
+
+teams.route("/:id/attachments", teamAttachmentsRouter);
 
 // silence the unused import warning until member-management routes land
 void or;

@@ -11,6 +11,16 @@
  * @<userId> token when the user picks someone from a typeahead.
  */
 
+export interface ChatAttachment {
+  /** R2 object key. Includes teamId so we can authorise per-team without
+   *  a separate lookup. Shape: `teams/<teamId>/<uuid>/<filename>`. */
+  key: string;
+  filename: string;
+  contentType: string;
+  /** Bytes. Set by the upload handler from the R2 put result. */
+  size: number;
+}
+
 export interface ChatMessage {
   id: string;
   senderId: string;
@@ -19,9 +29,16 @@ export interface ChatMessage {
   body: string;
   /** User IDs mentioned in the body via `@<userId>`. De-duplicated. */
   mentions: string[];
+  /** Files attached to this message. R2-backed. */
+  attachments?: ChatAttachment[];
   /** ISO-8601 timestamp. */
   createdAt: string;
 }
+
+/** Cap per upload — Workers free-tier request body limit + UX. */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
+/** Max attachments per message. */
+export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 
 const MENTION_RE = /(?:^|\s)@([A-Za-z0-9_-]{8,64})/g;
 

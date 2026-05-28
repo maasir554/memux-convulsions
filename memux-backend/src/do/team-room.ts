@@ -29,7 +29,13 @@
 
 import { DurableObject } from "cloudflare:workers";
 
-import { type ChatMessage, MAX_MESSAGE_LENGTH, parseMentions } from "../lib/messages";
+import {
+  type ChatAttachment,
+  type ChatMessage,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_MESSAGE_LENGTH,
+  parseMentions,
+} from "../lib/messages";
 import type { WorkerEnv } from "../env";
 
 interface Attachment {
@@ -122,11 +128,13 @@ export class TeamRoom extends DurableObject<WorkerEnv> {
       return;
     }
 
-    if (msg.type === "send" && typeof msg.body === "string") {
+    if (msg.type === "send" && (typeof msg.body === "string" || Array.isArray((msg as { attachments?: unknown }).attachments))) {
       const attached = ws.deserializeAttachment() as Attachment | null;
       if (!attached) return;
-      const body = msg.body.trim().slice(0, MAX_MESSAGE_LENGTH);
-      if (!body) return;
+      const incoming = msg as { body?: string; attachments?: unknown };
+      const body = (incoming.body ?? "").trim().slice(0, MAX_MESSAGE_LENGTH);
+      const attachments = this.sanitizeAttachments(incoming.attachments);
+      if (!body && attachments.length === 0) return;
 
       const message: ChatMessage = {
         id: crypto.randomUUID(),
@@ -135,12 +143,44 @@ export class TeamRoom extends DurableObject<WorkerEnv> {
         senderImage: attached.image,
         body,
         mentions: parseMentions(body),
+        ...(attachments.length > 0 ? { attachments } : {}),
         createdAt: new Date().toISOString(),
       };
 
       await this.storeMessage(message);
       this.broadcast({ type: "message", message });
     }
+  }
+
+  /**
+   * Validate client-supplied attachment refs.
+   *  - shape: { key, filename, contentType, size }
+   *  - key MUST start with `teams/<teamId>/` (we can't verify teamId
+   *    matches THIS DO without an extra binding hop, but the upload
+   *    handler already enforced membership before issuing the key)
+   *  - cap count, cap individual field lengths
+   */
+  private sanitizeAttachments(raw: unknown): ChatAttachment[] {
+    if (!Array.isArray(raw)) return [];
+    const out: ChatAttachment[] = [];
+    for (const item of raw.slice(0, MAX_ATTACHMENTS_PER_MESSAGE)) {
+      if (!item || typeof item !== "object") continue;
+      const a = item as Partial<ChatAttachment>;
+      if (
+        typeof a.key !== "string" ||
+        typeof a.filename !== "string" ||
+        typeof a.contentType !== "string" ||
+        typeof a.size !== "number"
+      ) continue;
+      if (!a.key.startsWith("teams/")) continue;
+      out.push({
+        key: a.key.slice(0, 512),
+        filename: a.filename.slice(0, 200),
+        contentType: a.contentType.slice(0, 100),
+        size: Math.max(0, Math.floor(a.size)),
+      });
+    }
+    return out;
   }
 
   async webSocketClose(
@@ -187,9 +227,14 @@ export class TeamRoom extends DurableObject<WorkerEnv> {
     const user = this.extractUser(request);
     if (!user) return new Response("missing user identity", { status: 401 });
 
-    const body = (await request.json().catch(() => null)) as { body?: string } | null;
-    const text = body?.body?.trim().slice(0, MAX_MESSAGE_LENGTH);
-    if (!text) return new Response(JSON.stringify({ error: "body required" }), { status: 400 });
+    const payload = (await request.json().catch(() => null)) as
+      | { body?: string; attachments?: unknown }
+      | null;
+    const text = (payload?.body ?? "").trim().slice(0, MAX_MESSAGE_LENGTH);
+    const attachments = this.sanitizeAttachments(payload?.attachments);
+    if (!text && attachments.length === 0) {
+      return new Response(JSON.stringify({ error: "body or attachments required" }), { status: 400 });
+    }
 
     const message: ChatMessage = {
       id: crypto.randomUUID(),
@@ -198,6 +243,7 @@ export class TeamRoom extends DurableObject<WorkerEnv> {
       senderImage: user.image,
       body: text,
       mentions: parseMentions(text),
+      ...(attachments.length > 0 ? { attachments } : {}),
       createdAt: new Date().toISOString(),
     };
     await this.storeMessage(message);

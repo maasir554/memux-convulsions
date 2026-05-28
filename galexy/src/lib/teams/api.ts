@@ -11,7 +11,13 @@
  * `this` rebind.
  */
 
-import type { ChatMessage, TeamDetail, TeamInvite, TeamSummary } from "./types";
+import type {
+  ChatAttachment,
+  ChatMessage,
+  TeamDetail,
+  TeamInvite,
+  TeamSummary,
+} from "./types";
 
 export const baseURL =
   process.env.NEXT_PUBLIC_MEMUX_API_URL ?? "http://localhost:8787";
@@ -122,7 +128,34 @@ export const teamsApi = {
       `/api/teams/${teamId}/messages`,
       { body },
     ),
+
+  // Upload a single file. The Worker enforces size + membership.
+  // Multipart isn't a JSON body so we bypass the shared request() helper.
+  uploadAttachment: async (teamId: string, file: File): Promise<ChatAttachment> => {
+    const form = new FormData();
+    form.append("file", file);
+    const r = await fetch(`${baseURL}/api/teams/${teamId}/attachments`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    const text = await r.text();
+    const data = text ? safeJson(text) : null;
+    if (!r.ok) {
+      const msg =
+        (data && typeof data === "object" && "error" in data && typeof data.error === "string"
+          ? data.error
+          : null) ?? `Upload failed (${r.status})`;
+      throw new ApiError(r.status, data, msg);
+    }
+    return (data as { attachment: ChatAttachment }).attachment;
+  },
 };
+
+/** URL the browser hits to fetch an attachment. Session cookie required. */
+export function attachmentUrl(key: string): string {
+  return `${baseURL}/api/attachments/${key}`;
+}
 
 /**
  * Browser WebSocket URL for the TeamRoom DO. Converts `http(s)://...` →

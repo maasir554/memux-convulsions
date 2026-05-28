@@ -14,6 +14,7 @@ import { cors } from "hono/cors";
 
 import { createAuth } from "./auth";
 import type { WorkerEnv } from "./env";
+import { attachmentDownloadRouter } from "./routes/attachments";
 import teamsRouter from "./routes/teams";
 
 // Durable Object class must be exported from the Worker entry so wrangler
@@ -62,5 +63,10 @@ app.get("/api/me", async (c) => {
 // Teams CRUD (Phase 3). All routes inside teamsRouter require a session
 // via the requireUser middleware — see src/middleware/auth.ts.
 app.route("/api/teams", teamsRouter);
+
+// Attachment downloads (Phase 4b). Sits OUTSIDE /api/teams so the key —
+// which already includes teams/<teamId>/ — isn't doubled in the URL.
+// Membership check happens inside the handler.
+app.route("/api/attachments", attachmentDownloadRouter);
 
 export default app;

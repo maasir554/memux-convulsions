@@ -32,6 +32,14 @@ export interface TeamDetail {
   members: TeamMember[];
 }
 
+export interface ChatAttachment {
+  /** R2 key — shape: teams/<teamId>/<uuid>/<filename> */
+  key: string;
+  filename: string;
+  contentType: string;
+  size: number;
+}
+
 export interface ChatMessage {
   id: string;
   senderId: string;
@@ -39,6 +47,7 @@ export interface ChatMessage {
   senderImage: string | null;
   body: string;
   mentions: string[];
+  attachments?: ChatAttachment[];
   createdAt: string;
 }
 

@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { teamRoomWsUrl } from "./api";
-import type { ChatMessage } from "./types";
+import type { ChatAttachment, ChatMessage } from "./types";
 
 export type RoomStatus = "connecting" | "open" | "closed" | "error";
 
@@ -28,7 +28,12 @@ export interface TeamRoomState {
   myId: string | null;
   messages: ChatMessage[];
   presence: Set<string>;
-  send: (body: string) => boolean;
+  /**
+   * Send a message. Returns true if the frame went out on an open
+   * socket, false if dropped (closed / empty). Either body or
+   * attachments must be present.
+   */
+  send: (body: string, attachments?: ChatAttachment[]) => boolean;
 }
 
 type ServerFrame =
@@ -136,17 +141,29 @@ export function useTeamRoom(teamId: string | null): TeamRoomState {
     };
   }, [teamId]);
 
-  const send = useCallback((body: string) => {
-    const trimmed = body.trim();
-    const ws = wsRef.current;
-    if (!trimmed || !ws || ws.readyState !== WebSocket.OPEN) return false;
-    try {
-      ws.send(JSON.stringify({ type: "send", body: trimmed }));
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
+  const send = useCallback(
+    (body: string, attachments?: ChatAttachment[]) => {
+      const trimmed = body.trim();
+      const atts = attachments ?? [];
+      const ws = wsRef.current;
+      if ((!trimmed && atts.length === 0) || !ws || ws.readyState !== WebSocket.OPEN) {
+        return false;
+      }
+      try {
+        ws.send(
+          JSON.stringify({
+            type: "send",
+            body: trimmed,
+            ...(atts.length > 0 ? { attachments: atts } : {}),
+          }),
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [],
+  );
 
   return { status, myId, messages, presence, send };
 }

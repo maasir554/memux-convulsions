@@ -21,12 +21,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Copy, Loader2, Send, UserPlus, Users } from "lucide-react";
+import {
+  ArrowLeft,
+  Copy,
+  Download,
+  File as FileIcon,
+  Loader2,
+  Paperclip,
+  Send,
+  UserPlus,
+  Users,
+  X,
+} from "lucide-react";
 
 import { useSession } from "@/lib/auth/client";
-import { teamsApi, ApiError } from "@/lib/teams/api";
+import { attachmentUrl, teamsApi, ApiError } from "@/lib/teams/api";
 import { useTeamRoom } from "@/lib/teams/use-team-room";
-import type { ChatMessage, TeamDetail, TeamMember } from "@/lib/teams/types";
+import type {
+  ChatAttachment,
+  ChatMessage,
+  TeamDetail,
+  TeamMember,
+} from "@/lib/teams/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -168,7 +184,8 @@ function RoomShell({
       {/* Composer */}
       <Composer
         disabled={room.status !== "open"}
-        onSend={(body) => room.send(body)}
+        teamId={team.id}
+        onSend={(body, atts) => room.send(body, atts)}
       />
 
       <InviteDialog
@@ -311,12 +328,66 @@ function MessageRow({
             </span>
           </div>
         )}
-        <div className="text-sm whitespace-pre-wrap break-words text-foreground/90">
-          {msg.body}
-        </div>
+        {msg.body && (
+          <div className="text-sm whitespace-pre-wrap break-words text-foreground/90">
+            {msg.body}
+          </div>
+        )}
+        {msg.attachments && msg.attachments.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-2">
+            {msg.attachments.map((a) => (
+              <AttachmentTile key={a.key} attachment={a} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function AttachmentTile({ attachment }: { attachment: ChatAttachment }) {
+  const url = attachmentUrl(attachment.key);
+  const isImage = attachment.contentType.startsWith("image/");
+  if (isImage) {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="block max-w-xs overflow-hidden rounded-md border bg-card"
+      >
+        {/* crossorigin=use-credentials so the browser sends the session
+            cookie on the image GET (which is a cross-origin request:
+            galexy:3000 → memux-backend:8787 in dev). */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={url}
+          alt={attachment.filename}
+          crossOrigin="use-credentials"
+          className="block max-h-72 w-auto"
+        />
+      </a>
+    );
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs text-foreground/90 hover:bg-card/80"
+    >
+      <FileIcon className="size-3.5 text-muted-foreground" />
+      <span className="max-w-[16rem] truncate">{attachment.filename}</span>
+      <span className="text-muted-foreground">{formatBytes(attachment.size)}</span>
+      <Download className="size-3.5 text-muted-foreground" />
+    </a>
+  );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function formatTime(iso: string): string {
@@ -411,21 +482,47 @@ function PresenceSidebar({
 // Composer
 // ─────────────────────────────────────────────────────────────────────────
 
+/**
+ * Pending attachment: tracks the local File + upload progress + the
+ * server-returned ChatAttachment once upload finishes. Render a
+ * skeleton chip while uploading; replace with the real chip on done.
+ */
+interface PendingAttachment {
+  id: string;             // local-only key for React lists
+  file: File;
+  status: "uploading" | "done" | "error";
+  attachment?: ChatAttachment;
+  error?: string;
+}
+
 function Composer({
   disabled,
+  teamId,
   onSend,
 }: {
   disabled: boolean;
-  onSend: (body: string) => boolean;
+  teamId: string;
+  onSend: (body: string, attachments?: ChatAttachment[]) => boolean;
 }) {
   const [value, setValue] = useState("");
+  const [pending, setPending] = useState<PendingAttachment[]>([]);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const hasUploading = pending.some((p) => p.status === "uploading");
+  const ready = pending.filter((p) => p.status === "done" && p.attachment);
+  const canSend =
+    !disabled && !hasUploading && (value.trim().length > 0 || ready.length > 0);
 
   const submit = useCallback(() => {
+    if (!canSend) return;
     const text = value.trim();
-    if (!text || disabled) return;
-    if (onSend(text)) setValue("");
-  }, [value, disabled, onSend]);
+    const atts = ready.map((p) => p.attachment!);
+    if (onSend(text, atts.length > 0 ? atts : undefined)) {
+      setValue("");
+      setPending([]);
+    }
+  }, [canSend, value, ready, onSend]);
 
   // Auto-grow up to 8 lines.
   useEffect(() => {
@@ -435,16 +532,74 @@ function Composer({
     ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
   }, [value]);
 
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const additions: PendingAttachment[] = Array.from(files).map((f) => ({
+      id: crypto.randomUUID(),
+      file: f,
+      status: "uploading",
+    }));
+    setPending((prev) => [...prev, ...additions]);
+
+    for (const item of additions) {
+      try {
+        const attachment = await teamsApi.uploadAttachment(teamId, item.file);
+        setPending((prev) =>
+          prev.map((p) =>
+            p.id === item.id ? { ...p, status: "done", attachment } : p,
+          ),
+        );
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Upload failed";
+        setPending((prev) =>
+          prev.map((p) =>
+            p.id === item.id ? { ...p, status: "error", error: message } : p,
+          ),
+        );
+      }
+    }
+  }
+
   return (
     <div className="shrink-0 border-t bg-background p-3">
+      {pending.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {pending.map((p) => (
+            <PendingChip
+              key={p.id}
+              pending={p}
+              onRemove={() => setPending((prev) => prev.filter((x) => x.id !== p.id))}
+            />
+          ))}
+        </div>
+      )}
       <div className="flex items-end gap-2">
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled}
+          title="Attach files"
+          aria-label="Attach files"
+        >
+          <Paperclip className="size-4" />
+        </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            void handleFiles(e.target.files);
+            e.target.value = ""; // allow re-selecting the same file
+          }}
+        />
         <textarea
           ref={taRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
-            // Enter sends, Shift+Enter newlines. Cmd/Ctrl+Enter also sends
-            // for users with Slack-style muscle memory.
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();
@@ -455,14 +610,56 @@ function Composer({
           rows={1}
           className="flex-1 resize-none rounded-md border bg-card px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring/50 disabled:opacity-60"
         />
-        <Button onClick={submit} disabled={disabled || !value.trim()}>
-          <Send className="size-3.5" />
+        <Button onClick={submit} disabled={!canSend}>
+          {hasUploading ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
         </Button>
       </div>
       <div className="mt-1 text-[10px] text-muted-foreground">
-        @userId mentions are stored on the message and will route notifications
-        later.
+        Enter sends · Shift+Enter for newline · attach files up to 25 MB
       </div>
+    </div>
+  );
+}
+
+function PendingChip({
+  pending,
+  onRemove,
+}: {
+  pending: PendingAttachment;
+  onRemove: () => void;
+}) {
+  const sizeLabel = formatBytes(pending.file.size);
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-md border px-2 py-1 text-xs",
+        pending.status === "error"
+          ? "border-destructive/40 bg-destructive/10 text-destructive"
+          : "bg-card",
+      )}
+    >
+      {pending.status === "uploading" ? (
+        <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+      ) : pending.status === "error" ? (
+        <span className="text-[10px] font-semibold uppercase">err</span>
+      ) : (
+        <FileIcon className="size-3.5 text-muted-foreground" />
+      )}
+      <span className="max-w-[12rem] truncate">{pending.file.name}</span>
+      <span className="text-muted-foreground">{sizeLabel}</span>
+      {pending.status === "error" && (
+        <span className="text-[10px]" title={pending.error}>
+          {pending.error}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={onRemove}
+        className="ml-1 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        aria-label="Remove"
+      >
+        <X className="size-3" />
+      </button>
     </div>
   );
 }

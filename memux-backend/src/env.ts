@@ -12,6 +12,9 @@ export interface WorkerEnv {
   // Durable Objects (Phase 4)
   TEAM_ROOM: DurableObjectNamespace;
 
+  // R2 (Phase 4b) — chat attachments
+  MEMUX_ATTACHMENTS: R2Bucket;
+
   // Vars (wrangler.jsonc → vars)
   BETTER_AUTH_URL: string;
   TRUSTED_ORIGINS: string;
