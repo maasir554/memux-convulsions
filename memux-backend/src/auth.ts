@@ -31,6 +31,26 @@ export function createAuth(env: WorkerEnv) {
         clientSecret: env.GOOGLE_CLIENT_SECRET,
       },
     },
+    account: {
+      // Cross-origin survival for the OAuth flow.
+      //
+      // Default is "database" when a DB is configured (it is), so the state
+      // payload already lives in `verification`. What still trips us up is
+      // the *additional* cookie check Better-Auth performs in the callback:
+      // it expects the `__Secure-better-auth.state` cookie set during
+      // /sign-in/social to come back on the Google → workers.dev redirect.
+      //
+      // For a vercel.app frontend + workers.dev backend split there is no
+      // shared parent domain (and .vercel.app is on the public suffix list),
+      // so browsers — Chrome's tracking-protection mode in particular —
+      // routinely drop that cookie. Symptom: `state_mismatch` on first sign-in.
+      //
+      // skipStateCookieCheck bypasses the cookie comparison; the signed
+      // state value in the callback URL is still looked up against the DB,
+      // so CSRF protection still holds.
+      storeStateStrategy: "database",
+      skipStateCookieCheck: true,
+    },
     advanced: {
       defaultCookieAttributes: {
         sameSite: isProd ? "none" : "lax",
