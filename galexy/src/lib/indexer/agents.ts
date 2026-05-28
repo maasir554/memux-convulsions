@@ -268,6 +268,56 @@ Describe the attached image and classify it.`;
   );
 }
 
+/* ----------------------------------------------- region-finder */
+
+export type RegionFinderInput = {
+  imageBase64: string;
+  mimeType: string;
+  /** Natural-language query describing what to locate inside the image. */
+  query: string;
+};
+
+export type RegionFinderOutput = {
+  /** [ymin, xmin, ymax, xmax] in 0..1000. Null when not confidently found. */
+  bbox: [number, number, number, number] | null;
+  caption: string;
+  /** "high" | "medium" | "low" — self-reported. Empty when bbox is null. */
+  confidence: string;
+};
+
+const REGION_FINDER_SCHEMA = `{
+  bbox: [ymin, xmin, ymax, xmax] | null,
+  caption: string,
+  confidence: "high" | "medium" | "low" | ""
+}`;
+
+const REGION_FINDER_SYSTEM = `You are the Region Finder. You receive ONE image and a natural-language query. Locate the rectangular region inside the image that best matches the query.
+
+Output a single bounding box in [ymin, xmin, ymax, xmax] normalised to 0..1000 (Gemini convention). The box should be TIGHT — large enough to contain the queried subject including a small margin, but no larger.
+
+If the queried subject isn't present in the image with reasonable confidence, return bbox = null and an empty confidence. Don't hallucinate a box for a subject that isn't there.
+
+caption: 1 short sentence describing what's in the box (or what you couldn't find).
+confidence: your self-rated confidence in the bbox placement.`;
+
+export async function regionFinder(
+  input: RegionFinderInput,
+  signal: AbortSignal,
+): Promise<RegionFinderOutput> {
+  const prompt = `Query: ${input.query}\n\nLocate the region in the attached image that best matches the query.`;
+  return jsonCall<RegionFinderOutput>(
+    {
+      prompt,
+      image: { base64: input.imageBase64, mimeType: input.mimeType },
+      system: REGION_FINDER_SYSTEM,
+      schema: REGION_FINDER_SCHEMA,
+      temperature: 0.1,
+      think: false,
+    },
+    signal,
+  );
+}
+
 /* ---------------------------------------------------------------- namer */
 
 export type NamerInput = {

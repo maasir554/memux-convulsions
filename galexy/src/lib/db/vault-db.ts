@@ -21,6 +21,7 @@ import {
 } from "@/lib/db/schema";
 import {
   NOTES,
+  type ImageBbox,
   type ItemType,
   type Note,
   type PdfAnnotation,
@@ -132,6 +133,7 @@ function noteToRow(note: Note): NewDbItem {
     blobKey: note.blobKey ?? null,
     sheetMeta: note.sheetMeta ?? null,
     pdfAnnotations: note.pdfAnnotations ?? null,
+    bboxes: note.bboxes ?? [],
     updatedAt: note.updatedAt ? new Date(note.updatedAt) : new Date(),
   };
 }
@@ -151,6 +153,7 @@ function rowToNote(row: DbItem): Note {
     blobKey: row.blobKey ?? undefined,
     sheetMeta: row.sheetMeta ?? undefined,
     pdfAnnotations: row.pdfAnnotations ?? undefined,
+    bboxes: row.bboxes ?? undefined,
     updatedAt: row.updatedAt.toISOString().slice(0, 10),
   };
 }
@@ -192,6 +195,27 @@ export async function persistPdfAnnotations(
   await db
     .update(items)
     .set({ pdfAnnotations, updatedAt: new Date() })
+    .where(eq(items.id, id));
+}
+
+/**
+ * Append a bounding-box region to an image item's `bboxes` jsonb. Pure
+ * metadata write — no PNG encoding, no separate item row. The indexer
+ * calls this for every Visioner diagram instead of materialising a crop.
+ */
+export async function appendBbox(
+  db: VaultDb,
+  id: string,
+  bbox: ImageBbox,
+): Promise<void> {
+  const [row] = await db
+    .select({ bboxes: items.bboxes })
+    .from(items)
+    .where(eq(items.id, id));
+  const existing = (row?.bboxes ?? []) as ImageBbox[];
+  await db
+    .update(items)
+    .set({ bboxes: [...existing, bbox], updatedAt: new Date() })
     .where(eq(items.id, id));
 }
 

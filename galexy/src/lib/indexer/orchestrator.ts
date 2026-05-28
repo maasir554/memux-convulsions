@@ -37,12 +37,15 @@ import {
 import {
   inlineDiagramRefs,
   materialiseDomImages,
+  materialiseSourceCapture,
   planIndexFolders,
+  recordBboxOnSource,
   renameIndexGroup,
-  writeCropImage,
+  updateCaptureSummary,
   writeManifest,
   writeSectionNote,
 } from "@/lib/indexer/materialise";
+import { writeBlob } from "@/lib/blob-store";
 import { getVaultDb } from "@/lib/db/vault-db";
 import { indexChunks, sections, type IndexerDomImage } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
@@ -84,8 +87,29 @@ type PendingSection = {
     pageOrdinal: number;
     visionerOutput: VisionerOutput;
     bitmap?: HTMLCanvasElement;
+    /**
+     * `items.id` of the materialised source-capture for this page, if any.
+     * Section md uses this to record bboxes against the source instead of
+     * writing a separate cropped image. Undefined for text-only sources.
+     */
+    sourceItemId?: string;
   }>;
 };
+
+/**
+ * Encode an HTMLCanvasElement to a PNG blob in OPFS and return the
+ * resulting blobKey. Used for PDF pages, where the source file's
+ * blobKey points at the whole PDF — each rendered page needs its own
+ * blob so a vault image item can reference just that page's bytes.
+ */
+async function encodeCanvasToBlobKey(canvas: HTMLCanvasElement, name: string): Promise<string> {
+  const blob = await new Promise<Blob | null>((res) =>
+    canvas.toBlob((b) => res(b), "image/png"),
+  );
+  if (!blob) throw new Error("Canvas → blob failed");
+  const file = new File([blob], name, { type: "image/png" });
+  return writeBlob(file);
+}
 
 export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> {
   const { signal } = hooks;
@@ -161,6 +185,9 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
 
     let sectionGlobalOrdinal = 0;
     let sessionState = "";
+    /** Background promises for per-capture summaries + embeddings. Awaited
+     *  before manifest write so the captures show up with descriptions. */
+    const captureSummaryPromises: Promise<unknown>[] = [];
 
     for (let fileIdx = 0; fileIdx < group.files.length; fileIdx++) {
       const fileRef = group.files[fileIdx];
@@ -230,6 +257,42 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
             extracted.thumbnailDataUrl,
           );
         }
+
+        // Materialise THIS page as a first-class capture item. PDF pages
+        // get a freshly-encoded blob; worksmith image files reuse the
+        // existing OPFS blob from the run's file ref so we don't double-
+        // store the same bytes. The resulting itemId is what every bbox
+        // recorded later this section is attached to.
+        const isImageFile = fileRef.mimeType.startsWith("image/");
+        let captureBlobKey: string | undefined;
+        if (isImageFile && fileRef.blobKey) {
+          captureBlobKey = fileRef.blobKey;
+        } else if (extracted.bitmap) {
+          try {
+            captureBlobKey = await encodeCanvasToBlobKey(
+              extracted.bitmap,
+              `${fileRef.name}-p${extracted.ordinal}.png`,
+            );
+          } catch (err) {
+            console.warn(`[indexer] page encode failed (${fileRef.name} p${extracted.ordinal}):`, err);
+          }
+        }
+        let sourceCaptureId: string | undefined;
+        if (captureBlobKey) {
+          try {
+            const captureOrdinal = `${String(fileIdx + 1).padStart(2, "0")}-${String(extracted.ordinal).padStart(2, "0")}`;
+            const { itemId } = await materialiseSourceCapture({
+              groupName,
+              ordinal: captureOrdinal,
+              blobKey: captureBlobKey,
+              mimeType: extracted.mimeType ?? "image/png",
+            });
+            sourceCaptureId = itemId;
+          } catch (err) {
+            console.warn(`[indexer] capture materialise failed (${fileRef.name} p${extracted.ordinal}):`, err);
+          }
+        }
+
         live.getState().setCurrentAction({
           verb: "reading",
           subject: `p${extracted.ordinal}`,
@@ -247,6 +310,28 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
           signal,
         );
         live.getState().setCurrentAction(null);
+
+        // Fire imageReader on the page in the background so we get a
+        // standalone description for the capture (becomes the item's
+        // summary + a vector chunk). Doesn't block the Visioner loop.
+        if (sourceCaptureId) {
+          captureSummaryPromises.push(
+            summariseAndEmbedCapture({
+              captureItemId: sourceCaptureId,
+              imageBase64: extracted.imageBase64,
+              mimeType: extracted.mimeType ?? "image/png",
+              fileName: fileRef.name,
+              pageOrdinal: extracted.ordinal,
+              userContext,
+              signal,
+            }).catch((err) =>
+              console.warn(
+                `[indexer] capture summary failed (${fileRef.name} p${extracted.ordinal}):`,
+                err,
+              ),
+            ),
+          );
+        }
         sessionState = result.sessionUpdate;
         live.getState().setCurrentTopic(result.topic);
         live.getState().markPageDone(extracted.ordinal);
@@ -269,6 +354,7 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
           pageOrdinal: extracted.ordinal,
           visionerOutput: result,
           bitmap: extracted.bitmap,
+          sourceItemId: sourceCaptureId,
         });
 
         if (result.transition === "end") {
@@ -408,6 +494,9 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
 
     // Wait for any straggling embeds (don't block the manifest on slow ones).
     await Promise.allSettled(embedPromises);
+    // Same for per-capture image-reader summaries — these populate the
+    // capture items' `summary` field and their vector chunks.
+    await Promise.allSettled(captureSummaryPromises);
 
     // Materialise DOM images (worksmith captures). For each one we:
     //   1. Look up the surrounding DOM context in the pruned tree (heading,
@@ -442,6 +531,23 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
           verb: "viewing",
           subject: `dom-${i + 1}`,
         });
+
+        // Gemma 4 doesn't accept SVG. Rather than fail the run, keep the
+        // SVG as a vault item with no agent-generated description (it's
+        // still viewable + still vector-searchable via its alt text on the
+        // section md that references it). Same fallback applies to
+        // anything else we know Gemma can't decode.
+        const mime = (img.mimeType || "").toLowerCase();
+        const READER_UNSUPPORTED_MIMES = new Set(["image/svg+xml"]);
+        if (READER_UNSUPPORTED_MIMES.has(mime)) {
+          await scratch(
+            runId,
+            `- Kept dom-${i + 1} without read (mime ${mime} unsupported by reader)`,
+          );
+          readImages.push({ ...img });
+          continue;
+        }
+
         try {
           const base64 = await readBlobAsBase64(img.blobKey);
           const ctx = group.prunedTree
@@ -615,28 +721,32 @@ async function buildSectionMd(opts: {
   let diagramCounter = 0;
   for (const p of opts.pages) {
     const v = p.visionerOutput;
-    const swaps: Array<{ title: string; alt: string }> = [];
+    const swaps: Array<{ sourceItemId?: string; bboxId?: string; alt: string }> = [];
     for (let i = 0; i < v.diagrams.length; i++) {
       const d = v.diagrams[i];
       diagramCounter++;
-      if (!p.bitmap) {
-        swaps.push({ title: "", alt: d.alt });
+      // No source item materialised (text-only file, or per-page encode
+      // failed). Render the diagram description as italic text via the
+      // empty-title degrade path in inlineDiagramRefs.
+      if (!p.sourceItemId) {
+        swaps.push({ alt: d.alt });
         continue;
       }
       try {
-        const { title } = await writeCropImage({
-          source: p.bitmap,
+        const { bboxId } = await recordBboxOnSource({
+          sourceItemId: p.sourceItemId,
           bbox: d.bbox,
-          groupName: opts.groupName,
-          sectionOrdinal: opts.sectionOrdinal,
-          diagramOrdinal: diagramCounter,
           alt: d.alt,
           caption: d.caption,
         });
-        swaps.push({ title, alt: d.alt || d.caption || `Figure ${diagramCounter}` });
+        swaps.push({
+          sourceItemId: p.sourceItemId,
+          bboxId,
+          alt: d.alt || d.caption || `Figure ${diagramCounter}`,
+        });
       } catch (err) {
-        console.warn(`[indexer] crop failed s${opts.sectionOrdinal} d${diagramCounter}:`, err);
-        swaps.push({ title: "", alt: d.alt });
+        console.warn(`[indexer] bbox record failed s${opts.sectionOrdinal} d${diagramCounter}:`, err);
+        swaps.push({ alt: d.alt });
       }
     }
     out.push(inlineDiagramRefs(v.text, swaps));
@@ -718,6 +828,70 @@ async function readBlobAsBase64(blobKey: string): Promise<string> {
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/**
+ * Run imageReader on a freshly-materialised source capture, persist the
+ * description as the item's summary, and embed it as a `summary`-kind
+ * chunk so the chat agent's `search_semantic` can hit the original page
+ * directly.
+ *
+ * Synthetic section row: we don't have a "real" section for whole pages
+ * (sections are derived from the Visioner's topic transitions across
+ * pages), so we create a kind=`image` section row keyed to the run with
+ * the description as both contentText and summary. The chunk's
+ * sectionId points at this row.
+ */
+async function summariseAndEmbedCapture(opts: {
+  captureItemId: string;
+  imageBase64: string;
+  mimeType: string;
+  fileName: string;
+  pageOrdinal: number;
+  userContext: string;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const result = await imageReaderCall(
+    {
+      imageBase64: opts.imageBase64,
+      mimeType: opts.mimeType,
+      src: opts.fileName,
+      alt: `Page ${opts.pageOrdinal} of ${opts.fileName}`,
+      context: "", // whole-page summary — no neighbouring-DOM context
+      userContext: opts.userContext,
+    },
+    opts.signal,
+  );
+  const description = result.description.trim();
+  if (!description) return;
+  await updateCaptureSummary({
+    itemId: opts.captureItemId,
+    summary: description,
+    tags: result.tags,
+  });
+
+  // Embed: section row of kind=image, one summary chunk for the page.
+  const sectionRowId = `sec-${crypto.randomUUID()}`;
+  const db = await getVaultDb();
+  await db.insert(sections).values({
+    id: sectionRowId,
+    runId: "", // not tied to a run, derivable via items.id if needed
+    sourceItemId: opts.captureItemId,
+    noteItemId: opts.captureItemId,
+    ordinal: opts.pageOrdinal,
+    kind: "image",
+    topic: `Page ${opts.pageOrdinal}`,
+    contentText: description,
+    summary: description,
+    questions: [],
+    concepts: result.tags,
+    images: [],
+  });
+  await embedSectionChunks(
+    sectionRowId,
+    { summary: description, questions: [], concepts: result.tags },
+    opts.signal,
+  ).catch((err) => console.warn("[indexer] capture embed failed:", err));
 }
 
 async function embedSectionChunks(

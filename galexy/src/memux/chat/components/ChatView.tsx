@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Brain, Sparkles, Wand2 } from "lucide-react";
+import { Brain, Database, Sparkles, Wand2 } from "lucide-react";
+
+import { runChatTurn } from "@/lib/chat/harness/orchestrator";
+import { useAgentStore } from "@/memux/chat/lib/agent-store";
+import { AgentPanel } from "@/memux/chat/components/AgentPanel";
 import {
   Conversation,
   ConversationContent,
@@ -57,6 +61,11 @@ export function ChatView({
   const [compacting, setCompacting] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Knowledge-base mode = drive the agentic harness (tools + scratchpad +
+  // right pane) instead of the vanilla streaming chat.
+  const [kbMode, setKbMode] = useState(false);
+  const applyAgentEvent = useAgentStore((s) => s.apply);
+  const resetAgent = useAgentStore((s) => s.reset);
 
   // Re-load models + health whenever the transport mode changes — switching
   // direct→backend (or vice-versa) hits a different endpoint, so the cached
@@ -148,6 +157,33 @@ export function ChatView({
     const ctl = new AbortController();
     abortRef.current = ctl;
 
+    if (kbMode) {
+      resetAgent();
+      const userText = parts.find((p) => p.type === "text");
+      const question = userText?.type === "text" ? userText.text : "";
+      await runChatTurn({
+        sessionId: active.id,
+        question,
+        model: active.model,
+        signal: ctl.signal,
+        onEvent: (event) => {
+          applyAgentEvent(event);
+          if (event.kind === "synth-token") {
+            appendText(assistantMsg.id, event.token);
+          } else if (event.kind === "synth-done") {
+            // synth-token already appended deltas; just finalise.
+            finishMessage(assistantMsg.id);
+            setIsStreaming(false);
+          } else if (event.kind === "turn-error") {
+            appendText(assistantMsg.id, `\n\n[error: ${event.error}]`);
+            finishMessage(assistantMsg.id);
+            setIsStreaming(false);
+          }
+        },
+      });
+      return;
+    }
+
     await streamChat({
       model: active.model,
       messages: [...active.messages, userMsg],
@@ -204,7 +240,8 @@ export function ChatView({
   }
 
   return (
-    <div className="flex-1 flex flex-col min-w-0">
+    <div className="flex-1 flex min-w-0">
+      <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex h-12 items-center gap-3 border-b px-4">
         <div className="text-sm font-medium truncate">{active.title}</div>
         <div className="flex items-center gap-1.5">
@@ -234,6 +271,15 @@ export function ChatView({
         >
           <Wand2 className="h-3.5 w-3.5" />
           {compacting ? "compacting…" : "compact"}
+        </Button>
+        <Button
+          size="sm"
+          variant={kbMode ? "default" : "ghost"}
+          onClick={() => setKbMode((v) => !v)}
+          title={kbMode ? "Vault knowledge-base mode is on. Click to disable." : "Enable knowledge-base mode (agent + tools + side panel)"}
+        >
+          <Database className="h-3.5 w-3.5" />
+          KB
         </Button>
         <Button
           size="sm"
@@ -333,6 +379,12 @@ export function ChatView({
 
       {/* keep messageText referenced so future tooltip uses survive tree-shaking */}
       <span hidden>{messageText({ id: "", role: "system", parts: [], createdAt: 0 })}</span>
+      </div>
+      {kbMode && (
+        <div className="hidden md:flex w-[40%] min-w-[360px] max-w-[640px] shrink-0">
+          <AgentPanel onClose={() => setKbMode(false)} />
+        </div>
+      )}
     </div>
   );
 }

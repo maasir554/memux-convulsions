@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 
-import type { GraphEdge, Note } from "@/lib/mock-notes";
+import { FOLDER_PREFIX, type GraphEdge, type Note } from "@/lib/mock-notes";
 import type {
   GraphColors,
   GraphLink,
@@ -130,16 +130,26 @@ export function GraphView({
       // Folders get fy pinned to their tier line so every folder sits at the
       // exact same y. Files stay free vertically so they can drift a few
       // pixels to avoid label collisions.
-      const baseNodes: GraphNode[] = items.map((item) => ({
-        id: item.id,
-        name: item.title,
-        type: item.type,
-        val:
+      // Derived folder items carry their FULL path as `title` (e.g.
+      // "_Indexes/Beever AI Comm..."). For the graph label we show only the
+      // last segment so a nested folder reads as its own name, not the
+      // chain leading to it.
+      const baseNodes: GraphNode[] = items.map((item) => {
+        const displayName =
           item.type === "folder"
-            ? Math.max(1, item.childIds?.length ?? 1)
-            : 1 + (backlinkCount[item.id] ?? 0),
-        ...(item.type === "folder" ? { fy: TIER_Y.folder } : {}),
-      }));
+            ? item.title.split("/").pop() || item.title
+            : item.title;
+        return {
+          id: item.id,
+          name: displayName,
+          type: item.type,
+          val:
+            item.type === "folder"
+              ? Math.max(1, item.childIds?.length ?? 1)
+              : 1 + (backlinkCount[item.id] ?? 0),
+          ...(item.type === "folder" ? { fy: TIER_Y.folder } : {}),
+        };
+      });
       const baseLinks: GraphLink[] = edges.map((e) => ({
         source: e.source,
         target: e.target,
@@ -169,12 +179,49 @@ export function GraphView({
       const tierLinks: GraphLink[] = [
         { source: USER_ID, target: WORKSPACE_ID, kind: "tree" },
       ];
-      // Anchor every top-level item (folders, plus root-level files that have
-      // no parent folder) to the workspace so nothing hangs in space.
+      // Anchor every top-level item to the workspace. A folder is
+      // "top-level" only when its path has no `/` separator — nested
+      // folders (e.g. `_Indexes/Group X`) link to their parent folder
+      // node instead, so the hierarchy reads correctly and we don't get
+      // both `_Indexes` and `_Indexes/X` floating as siblings off the
+      // workspace.
+      const folderIds = new Set(
+        items
+          .filter((it) => it.type === "folder")
+          .map((it) => it.id),
+      );
       for (const item of items) {
-        const isTopLevelFolder = item.type === "folder";
-        const isRootFile = item.type !== "folder" && item.folder === "";
-        if (isTopLevelFolder || isRootFile) {
+        if (item.type === "folder") {
+          const path = item.title;
+          const slashIdx = path.lastIndexOf("/");
+          if (slashIdx === -1) {
+            // Top-level folder — link to workspace.
+            tierLinks.push({
+              source: WORKSPACE_ID,
+              target: item.id,
+              kind: "tree",
+            });
+          } else {
+            const parentPath = path.slice(0, slashIdx);
+            const parentId = `${FOLDER_PREFIX}${parentPath}`;
+            if (folderIds.has(parentId)) {
+              tierLinks.push({
+                source: parentId,
+                target: item.id,
+                kind: "tree",
+              });
+            } else {
+              // Parent row missing (shouldn't happen — deriveFolders adds
+              // entries for every distinct folder + extras — but fall
+              // back to workspace so the node isn't orphaned).
+              tierLinks.push({
+                source: WORKSPACE_ID,
+                target: item.id,
+                kind: "tree",
+              });
+            }
+          }
+        } else if (item.folder === "") {
           tierLinks.push({
             source: WORKSPACE_ID,
             target: item.id,

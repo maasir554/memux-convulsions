@@ -10,6 +10,8 @@ import type {
   ImageReaderOutput,
   NamerInput,
   NamerOutput,
+  RegionFinderInput,
+  RegionFinderOutput,
   SummariserInput,
   SummariserOutput,
   VisionerInput,
@@ -66,6 +68,13 @@ export function imageReaderCall(
   signal?: AbortSignal,
 ): Promise<ImageReaderOutput> {
   return callAgent("imageReader", input, signal);
+}
+
+export function regionFinderCall(
+  input: RegionFinderInput,
+  signal?: AbortSignal,
+): Promise<RegionFinderOutput> {
+  return callAgent("regionFinder", input, signal);
 }
 
 /** Embed batch — uses /v1/embed directly (no agent dispatch needed). */

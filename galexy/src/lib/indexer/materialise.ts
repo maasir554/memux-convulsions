@@ -49,6 +49,16 @@ export function imagesFolderName(groupName: string): string {
 }
 
 /**
+ * Folder for source captures — the original screenshots / rendered PDF
+ * pages the run started from. These are first-class image items so
+ * notes can wikilink them with `#bbox=…` fragments and bypass the old
+ * crop-as-separate-file model.
+ */
+export function capturesFolderName(groupName: string): string {
+  return `${indexFolderName(groupName)}/captures`;
+}
+
+/**
  * Returns the per-run folder path. Lazy: does NOT create any folder rows in
  * the DB up front. Each write function below calls `insertFolder` itself the
  * moment it has content to drop in. That way a run that fails before writing
@@ -187,6 +197,127 @@ export async function renameIndexGroup(
 }
 
 /** Write a section md file. Returns the items.id. Creates folder rows lazily. */
+/**
+ * Persist an original source page (worksmith screenshot or rendered PDF
+ * page) as a vault `image` item so notes can reference regions of it
+ * via `wikilink:<itemId>#bbox=…`. The bytes already live in OPFS — we
+ * just create the items row pointing at the same blob, no copy.
+ *
+ * Returns the items.id so callers can record bboxes against it later.
+ */
+export async function materialiseSourceCapture(opts: {
+  groupName: string;
+  /** Stable handle within the run (e.g. fileIdx-pageOrdinal). Used for the title. */
+  ordinal: string;
+  /** Optional caption / summary text. May be empty; updated by imageReader later. */
+  summary?: string;
+  blobKey?: string | null;
+  /** Optional packaged-asset URL (legacy / pre-shipped images). */
+  src?: string | null;
+  /** Source-file mime so the viewer picks the right renderer. */
+  mimeType?: string;
+}): Promise<{ itemId: string; title: string }> {
+  const db = await getVaultDb();
+  const folder = capturesFolderName(opts.groupName);
+  await insertFolder(db, ROOT);
+  await insertFolder(db, indexFolderName(opts.groupName));
+  await insertFolder(db, folder);
+  const title = `cap-${opts.ordinal}`;
+  const id = `idx-capture-${crypto.randomUUID()}`;
+  const note: Note = {
+    id,
+    title,
+    folder,
+    type: "image",
+    summary: (opts.summary ?? "").trim(),
+    content: "",
+    tags: ["indexed", "capture"],
+    updatedAt: new Date().toISOString().slice(0, 10),
+    blobKey: opts.blobKey ?? undefined,
+    src: opts.src ?? undefined,
+    bboxes: [],
+  };
+  await insertItem(db, note);
+  return { itemId: id, title };
+}
+
+/**
+ * Update an already-materialised capture with the imageReader agent's
+ * description (runs *after* the source page has been visualised, when
+ * we have the LLM's summary in hand). Only writes if non-empty so a
+ * failed reader call doesn't blank out an existing summary.
+ */
+export async function updateCaptureSummary(opts: {
+  itemId: string;
+  summary: string;
+  /** Optional model-derived tag list to append to the item's tags. */
+  tags?: string[];
+}): Promise<void> {
+  const summary = opts.summary.trim();
+  if (!summary) return;
+  const db = await getVaultDb();
+  const [row] = await db
+    .select({ tags: items.tags })
+    .from(items)
+    .where(eq(items.id, opts.itemId));
+  const existingTags = (row?.tags ?? []) as string[];
+  const merged = Array.from(
+    new Set([...existingTags, ...(opts.tags?.filter((t) => t.trim()) ?? [])]),
+  );
+  await db
+    .update(items)
+    .set({ summary, tags: merged, updatedAt: new Date() })
+    .where(eq(items.id, opts.itemId));
+}
+
+/**
+ * Append a bounding-box region to a previously-materialised capture's
+ * `bboxes` jsonb. Replacement for the old `writeCropImage` path —
+ * pure metadata, no encoding. Returns the bbox id so the section md
+ * can build a stable `#bbox=<id>` reference.
+ */
+export async function recordBboxOnSource(opts: {
+  sourceItemId: string;
+  bbox: [number, number, number, number];
+  alt: string;
+  caption: string;
+  sectionId?: string;
+  source?: string;
+}): Promise<{ bboxId: string }> {
+  const bboxId = `bb-${crypto.randomUUID()}`;
+  const db = await getVaultDb();
+  const [row] = await db
+    .select({ bboxes: items.bboxes })
+    .from(items)
+    .where(eq(items.id, opts.sourceItemId));
+  const existing = ((row?.bboxes as unknown) as Array<{
+    id: string;
+    bbox: [number, number, number, number];
+    alt: string;
+    caption: string;
+    sectionId?: string;
+    source?: string;
+  }> | null) ?? [];
+  await db
+    .update(items)
+    .set({
+      bboxes: [
+        ...existing,
+        {
+          id: bboxId,
+          bbox: opts.bbox,
+          alt: opts.alt,
+          caption: opts.caption,
+          sectionId: opts.sectionId,
+          source: opts.source ?? "visioner",
+        },
+      ],
+      updatedAt: new Date(),
+    })
+    .where(eq(items.id, opts.sourceItemId));
+  return { bboxId };
+}
+
 export async function writeSectionNote(opts: {
   groupName: string;
   ordinal: number;
@@ -457,23 +588,41 @@ export async function materialiseDomImages(opts: {
 
 /**
  * Replace <!-- diagram:N --> placeholders in a page's markdown with image
- * references pointing at materialised crops. Unmatched placeholders are
- * removed silently. Swaps with an empty title (crop failed / no bitmap)
- * degrade to an italic descriptor block — never a broken wikilink.
+ * references pointing at the source capture + a `#bbox=<bboxId>` fragment.
+ * The renderer (markdown-view) reads the fragment, looks up the named
+ * region in the source image's `bboxes` metadata, and renders just that
+ * crop inline (with the full image available via the modal).
+ *
+ * Unmatched placeholders are removed silently. Swaps without a source
+ * (capture materialise / bbox record failed) degrade to an italic
+ * descriptor block — never a broken wikilink.
+ *
+ * For backwards-compat: an entry with a `title` field (legacy crop item
+ * shape) still emits the old `wikilink:<cropTitle>` form so groups indexed
+ * before this change keep rendering. New runs always emit the new form.
  */
 export function inlineDiagramRefs(
   text: string,
-  diagrams: Array<{ title: string; alt: string }>,
+  diagrams: Array<{
+    sourceItemId?: string;
+    bboxId?: string;
+    title?: string;
+    alt: string;
+  }>,
 ): string {
   return text.replace(/<!--\s*diagram:(\d+)\s*-->/g, (_, indexStr) => {
     const i = Number.parseInt(indexStr, 10);
     const d = diagrams[i];
     if (!d) return "";
-    if (!d.title) {
-      // No materialised crop — render the description as a quote block so the
-      // reader still gets the content of the missing diagram.
-      return d.alt ? `\n\n> *${d.alt}*\n\n` : "";
+    if (d.sourceItemId && d.bboxId) {
+      const url = `wikilink:${encodeURIComponent(d.sourceItemId)}#bbox=${encodeURIComponent(d.bboxId)}`;
+      return `\n\n![${d.alt}](${url})\n\n`;
     }
-    return `\n\n![${d.alt}](wikilink:${encodeURIComponent(d.title)})\n\n`;
+    if (d.title) {
+      // Legacy: a separately-stored crop item with its own title.
+      return `\n\n![${d.alt}](wikilink:${encodeURIComponent(d.title)})\n\n`;
+    }
+    // No materialised target — render the description as a quote block.
+    return d.alt ? `\n\n> *${d.alt}*\n\n` : "";
   });
 }

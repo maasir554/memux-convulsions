@@ -7,7 +7,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-import type { PdfAnnotation, SheetMeta } from "@/lib/mock-notes";
+import type { ImageBbox, PdfAnnotation, SheetMeta } from "@/lib/mock-notes";
 
 // Empty folders need a home of their own — folders are otherwise derived from
 // the files they contain, so an empty folder would vanish on reload.
@@ -44,6 +44,13 @@ export const items = pgTable("items", {
   blobKey: text("blob_key"),
   sheetMeta: jsonb("sheet_meta").$type<SheetMeta>(),
   pdfAnnotations: jsonb("pdf_annotations").$type<PdfAnnotation[]>(),
+  /**
+   * For image-type items only: persistent bounding-box metadata so notes
+   * can reference a region of the image without materialising a separate
+   * cropped file. Each entry is one named region the indexer (or a chat
+   * agent) recorded against this image.
+   */
+  bboxes: jsonb("bboxes").$type<ImageBbox[]>().notNull().default([]),
   updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
 });
 
@@ -77,6 +84,7 @@ CREATE TABLE IF NOT EXISTS items (
 export const ITEMS_MIGRATIONS: readonly string[] = [
   `ALTER TABLE items ADD COLUMN IF NOT EXISTS sheet_meta jsonb;`,
   `ALTER TABLE items ADD COLUMN IF NOT EXISTS pdf_annotations jsonb;`,
+  `ALTER TABLE items ADD COLUMN IF NOT EXISTS bboxes jsonb NOT NULL DEFAULT '[]'::jsonb;`,
 ];
 
 // ===========================================================================

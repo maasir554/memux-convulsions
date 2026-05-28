@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
-import { Check, ImageOff } from "lucide-react";
+import { createContext, useContext, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { Check, ImageOff, X } from "lucide-react";
 import ReactMarkdown, {
   type Components,
   defaultUrlTransform,
@@ -119,12 +120,19 @@ export function MarkdownView({
     img({ src, alt, node, ...props }) {
       void node;
       if (typeof src === "string" && src.startsWith("wikilink:")) {
-        const title = decodeWikiTitle(src.slice("wikilink:".length));
-        const note = resolveWikiImage?.(title) ?? null;
+        const raw = src.slice("wikilink:".length);
+        // Split the URL fragment out: `wikilink:<token>#bbox=<id>` carries
+        // a named region reference. The token before the `#` is the
+        // image's id (preferred) or title (legacy fallback).
+        const hashIdx = raw.indexOf("#");
+        const token = decodeWikiTitle(hashIdx >= 0 ? raw.slice(0, hashIdx) : raw);
+        const fragment = hashIdx >= 0 ? raw.slice(hashIdx + 1) : "";
+        const bboxId = parseFragmentBbox(fragment);
+        const note = resolveWikiImage?.(token) ?? null;
         if (note) {
-          return <WikilinkImage note={note} alt={alt ?? ""} />;
+          return <WikilinkImage note={note} alt={alt ?? ""} bboxId={bboxId} />;
         }
-        return <BrokenImage alt={alt ?? ""} reason={`Couldn't resolve ${title}`} />;
+        return <BrokenImage alt={alt ?? ""} reason={`Couldn't resolve ${token}`} />;
       }
       return (
         <ExternalImage
@@ -192,15 +200,38 @@ function TaskCheckbox({
 }
 
 /**
- * Renders an image whose source is a vault Note — either an OPFS-backed blob
- * (Note.blobKey) or a packaged asset (Note.src). Falls back to the alt text
- * while the OPFS read is in flight, and renders a themed BrokenImage block
- * if neither source is available or the bytes don't decode.
+ * Renders an image whose source is a vault Note. Two modes:
+ *
+ *   • Without `bboxId`: render the full image (legacy + general case).
+ *   • With `bboxId`: look up the named region on note.bboxes and render
+ *     ONLY the cropped region inline via `object-fit:none` + scale, so we
+ *     don't need to materialise a separate cropped image. Click opens a
+ *     modal that shows the FULL image with a rectangle overlay around the
+ *     region — preserves context the user might want.
+ *
+ * Falls back to the alt text while the OPFS read is in flight, and renders
+ * a themed BrokenImage block if neither source is available or the bytes
+ * don't decode.
  */
-function WikilinkImage({ note, alt }: { note: Note; alt: string }) {
+function WikilinkImage({
+  note,
+  alt,
+  bboxId,
+}: {
+  note: Note;
+  alt: string;
+  bboxId: string | null;
+}) {
   const blobUrl = useBlobUrl(note.blobKey);
   const [errored, setErrored] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
   const url = blobUrl ?? note.src ?? null;
+
+  // Resolve the bbox metadata once when both the id + the note are present.
+  const bbox = bboxId
+    ? (note.bboxes ?? []).find((b) => b.id === bboxId) ?? null
+    : null;
+
   if (!url) {
     return (
       <span className="my-2 inline-block rounded-md border border-dashed border-muted-foreground/40 px-3 py-2 text-xs italic text-muted-foreground">
@@ -211,15 +242,243 @@ function WikilinkImage({ note, alt }: { note: Note; alt: string }) {
   if (errored) {
     return <BrokenImage alt={alt || note.title} reason="Bytes wouldn't decode" />;
   }
+
+  const displayAlt = alt || bbox?.alt || note.title;
+
+  if (bbox) {
+    return (
+      <>
+        <BboxCropInline
+          src={url}
+          alt={displayAlt}
+          bbox={bbox.bbox}
+          onClick={() => setModalOpen(true)}
+          onError={() => setErrored(true)}
+        />
+        {modalOpen && (
+          <BboxModal
+            src={url}
+            alt={displayAlt}
+            note={note}
+            bbox={bbox.bbox}
+            caption={bbox.caption || bbox.alt}
+            onClose={() => setModalOpen(false)}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Plain whole-image render.
   return (
-    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={url}
-      alt={alt || note.title}
+      alt={displayAlt}
       onError={() => setErrored(true)}
       className="my-3 rounded-md border bg-muted/20 max-w-full"
     />
   );
+}
+
+/**
+ * Inline cropped-region preview. We display the source image inside a
+ * fixed-size container with `object-fit: none`, then translate + scale so
+ * only the bbox region is visible — equivalent to cropping at render time
+ * without ever encoding a separate file.
+ *
+ * `bbox` is `[ymin, xmin, ymax, xmax]` in the 0..1000 normalised space.
+ * We need the image's intrinsic dimensions to compute pixel offsets, so
+ * we read them from the `<img>`'s `onLoad` and re-render once available.
+ */
+function BboxCropInline({
+  src,
+  alt,
+  bbox,
+  onClick,
+  onError,
+}: {
+  src: string;
+  alt: string;
+  bbox: [number, number, number, number];
+  onClick: () => void;
+  onError: () => void;
+}) {
+  const PREVIEW_HEIGHT = 220;
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+
+  const [ymin, xmin, ymax, xmax] = bbox;
+  // Crop dimensions in pixels of the source image. Computed once we know
+  // the natural size; until then we render the image whole so the box is
+  // never wrong.
+  const cropPx = natural
+    ? {
+        x: (xmin / 1000) * natural.w,
+        y: (ymin / 1000) * natural.h,
+        w: ((xmax - xmin) / 1000) * natural.w,
+        h: ((ymax - ymin) / 1000) * natural.h,
+      }
+    : null;
+
+  // Scale so the crop fills the preview height (or width, whichever's
+  // tighter on aspect). The image is then translated so the crop's
+  // top-left aligns with the container's top-left.
+  const scale = cropPx ? PREVIEW_HEIGHT / cropPx.h : 1;
+  const containerWidth = cropPx ? Math.min(560, Math.max(120, cropPx.w * scale)) : 360;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Click to enlarge — full image + region overlay"
+      className={cn(
+        "group/bbox my-3 block overflow-hidden rounded-md border border-border bg-muted/20 p-0",
+        "transition-all hover:border-foreground/30 hover:shadow-lg",
+      )}
+      style={{ height: PREVIEW_HEIGHT, width: containerWidth }}
+    >
+      <div
+        className="relative h-full w-full overflow-hidden"
+        style={{
+          // We render the image at its natural size, scaled to make the
+          // crop fit the preview, then translated so the crop's TL anchors
+          // the container's TL.
+        }}
+      >
+        <img
+          src={src}
+          alt={alt}
+          onLoad={(e) => {
+            const el = e.currentTarget;
+            setNatural({ w: el.naturalWidth, h: el.naturalHeight });
+          }}
+          onError={onError}
+          className="absolute select-none"
+          draggable={false}
+          style={{
+            top: cropPx ? `${-cropPx.y * scale}px` : 0,
+            left: cropPx ? `${-cropPx.x * scale}px` : 0,
+            width: natural ? `${natural.w * scale}px` : "auto",
+            height: natural ? `${natural.h * scale}px` : "100%",
+            maxWidth: "none",
+          }}
+        />
+      </div>
+    </button>
+  );
+}
+
+/**
+ * Full-image modal with a rectangle overlay marking the bbox region.
+ * Lets the user see the cropped region in context. Esc / backdrop click
+ * closes.
+ */
+function BboxModal({
+  src,
+  alt,
+  note,
+  bbox,
+  caption,
+  onClose,
+}: {
+  src: string;
+  alt: string;
+  note: Note;
+  bbox: [number, number, number, number];
+  caption: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  if (typeof document === "undefined") return null;
+
+  const [ymin, xmin, ymax, xmax] = bbox;
+  const topPct = ymin / 10;
+  const leftPct = xmin / 10;
+  const widthPct = (xmax - xmin) / 10;
+  const heightPct = (ymax - ymin) / 10;
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 backdrop-blur-sm"
+    >
+      <div
+        className="relative flex max-h-[92vh] max-w-[92vw] flex-col gap-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 rounded-t-lg bg-card/80 px-4 py-2 text-sm backdrop-blur">
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-semibold tracking-tight text-foreground">
+              {caption || note.title}
+            </div>
+            {note.folder && (
+              <div className="truncate font-mono text-[10px] text-muted-foreground">
+                {note.folder}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-md border border-border bg-muted/40 p-1.5 text-muted-foreground hover:border-foreground/30 hover:bg-muted/70 hover:text-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+        <div className="relative">
+          <img
+            src={src}
+            alt={alt}
+            className="max-h-[80vh] max-w-[92vw] rounded-b-lg object-contain"
+          />
+          {/* Rectangle overlay marking the bbox region. Uses % so the box
+              tracks the rendered image regardless of object-fit scaling.
+              The CSS shadow-inset gives a subtle gradient highlight; the
+              border + outer ring make the box pop against any background. */}
+          <div
+            className="pointer-events-none absolute rounded-sm border-2 border-primary shadow-[0_0_0_4px_color-mix(in_oklch,var(--primary)_22%,transparent),inset_0_0_0_9999px_color-mix(in_oklch,black_55%,transparent)]"
+            style={{
+              top: `${topPct}%`,
+              left: `${leftPct}%`,
+              width: `${widthPct}%`,
+              height: `${heightPct}%`,
+              // Note: the inset shadow above darkens the bbox AREA on top of
+              // an outer dimmer applied via the trick below — but we'd need
+              // a 4-sided box-shadow mask to dim only OUTSIDE the box.
+            }}
+            aria-hidden
+          />
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * Parse the URL fragment of a wikilink: image to extract a bbox id.
+ * Accepts `bbox=<id>` (preferred) or the trailing form `#<id>`.
+ */
+function parseFragmentBbox(fragment: string): string | null {
+  if (!fragment) return null;
+  const params = new URLSearchParams(fragment);
+  const id = params.get("bbox");
+  if (id) return id;
+  return null;
 }
 
 /**

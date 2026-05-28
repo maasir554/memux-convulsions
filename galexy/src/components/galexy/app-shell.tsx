@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PanelRight } from "lucide-react";
 import { usePanelRef, type PanelSize } from "react-resizable-panels";
+import { useSearchParams } from "next/navigation";
 
 import {
   ResizableHandle,
@@ -55,6 +56,23 @@ export function AppShell() {
 
   const [activeId, setActiveId] = useState<string | null>("welcome");
   const [openTabs, setOpenTabs] = useState<string[]>(["welcome"]);
+
+  // Deep-link: /vault?open=<itemId> opens that item in a tab on mount and
+  // every time the param changes. Chat citations and graph nodes both
+  // navigate via this contract. We don't strip the param after consuming
+  // — that way the back button still works to re-enter the same state.
+  const searchParams = useSearchParams();
+  const requestedOpen = searchParams.get("open");
+  const lastOpenedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!requestedOpen) return;
+    if (lastOpenedRef.current === requestedOpen) return;
+    lastOpenedRef.current = requestedOpen;
+    setActiveId(requestedOpen);
+    setOpenTabs((tabs) =>
+      tabs.includes(requestedOpen) ? tabs : [...tabs, requestedOpen],
+    );
+  }, [requestedOpen]);
   const [leftView, setLeftView] = useState<LeftView>("files");
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
@@ -185,8 +203,13 @@ export function AppShell() {
     return titleToId.has(title.toLowerCase());
   }
 
-  function resolveWikiImage(title: string): Note | null {
-    const id = titleToId.get(title.toLowerCase());
+  function resolveWikiImage(token: string): Note | null {
+    // Accept either an items.id (preferred for the new bbox-aware
+    // references emitted by the indexer) or a case-insensitive title
+    // (legacy crop wikilinks and human-typed `![alt](wikilink:My Pic)`).
+    const direct = byId.get(token);
+    if (direct && direct.type === "image") return direct;
+    const id = titleToId.get(token.toLowerCase());
     if (!id) return null;
     const note = byId.get(id);
     if (!note || note.type !== "image") return null;

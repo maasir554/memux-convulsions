@@ -1,7 +1,83 @@
 "use client";
 
 import { Streamdown } from "streamdown";
+import type { Components } from "streamdown";
 import { cn } from "@/memux/chat/lib/utils";
+import { VaultCitation } from "@/memux/chat/components/citations/VaultCitation";
+import { VaultImageEmbed } from "@/memux/chat/components/citations/VaultImageEmbed";
+
+/**
+ * The agent emits citations as `vault:<itemId>` and `vault-image:<itemId>`
+ * URL schemes. But Streamdown ships rehype-sanitize with a strict default
+ * schema that only allows http/https for src/href — custom schemes are
+ * dropped, then rehype-harden paints a `[Image blocked: …]` placeholder.
+ *
+ * Workaround: pre-process the markdown to rewrite our schemes to a private
+ * https origin (`https://vault.local/item/<id>` and
+ * `…/image/<id>`). Those survive sanitization unchanged. Our `a` / `img`
+ * component overrides recognise the origin and delegate to the citation
+ * components.
+ *
+ * The user never sees the placeholder URL — both renderers consume the id
+ * and render a chip / embed without ever showing the synthetic href.
+ */
+const VAULT_HOST = "vault.local";
+
+function rewriteCitationsForSanitizer(md: string): string {
+  return md
+    .replace(/]\(vault-image:([^)\s]+)\)/g, `](https://${VAULT_HOST}/image/$1)`)
+    .replace(/]\(vault:([^)\s]+)\)/g, `](https://${VAULT_HOST}/item/$1)`);
+}
+
+function extractVaultId(url: string, prefix: string): string | null {
+  // Accept both `https://vault.local/<prefix>/<id>` (post-rewrite) and the
+  // raw `vault:` / `vault-image:` form (in case anyone else upstream skips
+  // the rewriter). Robust to either.
+  try {
+    const u = new URL(url);
+    if (u.host === VAULT_HOST && u.pathname.startsWith(`/${prefix}/`)) {
+      return decodeURIComponent(u.pathname.slice(`/${prefix}/`.length));
+    }
+  } catch {
+    // not an absolute URL — fall through to direct-scheme check
+  }
+  const rawPrefix = prefix === "image" ? "vault-image:" : "vault:";
+  if (url.startsWith(rawPrefix)) return url.slice(rawPrefix.length);
+  return null;
+}
+
+/**
+ * Custom renderers for the two citation schemes the agent emits:
+ *   [title](vault:<itemId>)        → VaultCitation chip
+ *   ![alt](vault-image:<itemId>)   → VaultImageEmbed (modal-on-click)
+ *
+ * Plain links and images fall through to streamdown's defaults.
+ */
+const citationComponents: Components = {
+  a({ href, children, ...rest }) {
+    const id = typeof href === "string" ? extractVaultId(href, "item") : null;
+    if (id) {
+      return <VaultCitation itemId={id} display={children} />;
+    }
+    return (
+      <a href={href} {...rest}>
+        {children}
+      </a>
+    );
+  },
+  img({ src, alt, ...rest }) {
+    const id = typeof src === "string" ? extractVaultId(src, "image") : null;
+    if (id) {
+      return (
+        <VaultImageEmbed
+          itemId={id}
+          alt={typeof alt === "string" ? alt : ""}
+        />
+      );
+    }
+    return <img src={src} alt={alt ?? ""} {...rest} />;
+  },
+};
 
 /**
  * Models often write quasi-headings like `**1. Appearance and Size**` on
@@ -29,7 +105,7 @@ export function Response({
   content: string;
   className?: string;
 }) {
-  const processed = promoteHeadings(content);
+  const processed = rewriteCitationsForSanitizer(promoteHeadings(content));
   return (
     <div
       className={cn(
@@ -49,7 +125,12 @@ export function Response({
         className,
       )}
     >
-      <Streamdown>{processed}</Streamdown>
+      <Streamdown
+        components={citationComponents}
+        linkSafety={{ enabled: false }}
+      >
+        {processed}
+      </Streamdown>
     </div>
   );
 }

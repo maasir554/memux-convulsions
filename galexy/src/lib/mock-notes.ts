@@ -30,6 +30,26 @@ export type PdfAnnotation = {
   createdAt: string; // ISO
 };
 
+/**
+ * Named bounding-box region recorded against an image item. Used so a note
+ * can reference a region of an existing image (`![alt](wikilink:<id>#bbox=<id>)`
+ * or via inline coordinates) without materialising a separate cropped file.
+ *
+ * `bbox` is `[ymin, xmin, ymax, xmax]` in the 0..1000 normalised coordinate
+ * system the Visioner / image-reader agents use. Storing in normalised form
+ * means a thumbnail-render path can be cheap (multiply by intrinsic size).
+ */
+export type ImageBbox = {
+  id: string;
+  bbox: [number, number, number, number];
+  alt: string;
+  caption: string;
+  /** When the bbox was recorded during indexing, the section it belongs to. */
+  sectionId?: string;
+  /** Optional creator label — "visioner", "user", "chat-agent", etc. */
+  source?: string;
+};
+
 export type Note = {
   id: string;
   title: string;
@@ -46,6 +66,7 @@ export type Note = {
   childIds?: string[]; // for folder items
   sheetMeta?: SheetMeta; // CSV viewer's persisted layout state
   pdfAnnotations?: PdfAnnotation[]; // PDF viewer's box comments
+  bboxes?: ImageBbox[]; // image-only: persistent named regions
 };
 
 // --- The vault (files) -------------------------------------------------------
