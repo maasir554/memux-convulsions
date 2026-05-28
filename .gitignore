@@ -49,3 +49,9 @@ next-env.d.ts
 
 # curl test artefacts
 cookies.txt
+
+# local agent / coding-tool state (never checked in)
+.agents/
+.claude/
+.codex/
+skills-lock.json
