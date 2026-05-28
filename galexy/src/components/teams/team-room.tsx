@@ -18,18 +18,28 @@
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Copy,
-  Download,
   File as FileIcon,
   Loader2,
+  PanelRightClose,
+  PanelRightOpen,
   Paperclip,
   Send,
   Trash2,
+  Upload,
   UserPlus,
   Users,
   X,
@@ -38,6 +48,7 @@ import {
 import { useSession } from "@/lib/auth/client";
 import { attachmentUrl, teamsApi, ApiError } from "@/lib/teams/api";
 import { useTeamRoom } from "@/lib/teams/use-team-room";
+import { AttachmentModal } from "@/components/teams/attachment-modal";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -135,6 +146,8 @@ function RoomShell({
   room: ReturnType<typeof useTeamRoom>;
 }) {
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [modalAttachment, setModalAttachment] = useState<ChatAttachment | null>(null);
   const canInvite = team.myRole === "owner" || team.myRole === "admin";
 
   // Build a lookup so the message rows can resolve sender → live presence info.
@@ -144,8 +157,53 @@ function RoomShell({
     return m;
   }, [team.members]);
 
+  // Whole-shell drag-drop. Files dragged onto ANY part of the room get
+  // forwarded to the composer's upload pipeline. We track depth (enter -
+  // leave) instead of a single boolean because dragenter fires once per
+  // child element you cross — a naive boolean would flicker as the cursor
+  // moves over message rows.
+  const composerRef = useRef<ComposerHandle | null>(null);
+  const dragDepth = useRef(0);
+  const [draggingFiles, setDraggingFiles] = useState(false);
+
+  const isFileDrag = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer.types ?? []).includes("Files");
+
+  const onDragEnter = useCallback((e: React.DragEvent) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDraggingFiles(true);
+  }, []);
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDraggingFiles(false);
+  }, []);
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault(); // required so onDrop fires
+    e.dataTransfer.dropEffect = "copy";
+  }, []);
+  const onDrop = useCallback((e: React.DragEvent) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDraggingFiles(false);
+    if (e.dataTransfer.files.length > 0) {
+      composerRef.current?.addFiles(e.dataTransfer.files);
+    }
+  }, []);
+
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
+    <div
+      className="relative flex h-full min-h-0 flex-1 flex-col bg-background"
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
       {/* Header */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <Link
@@ -160,16 +218,33 @@ function RoomShell({
         <span className="text-xs text-muted-foreground">
           {team.members.length} member{team.members.length === 1 ? "" : "s"}
         </span>
-        {canInvite && (
+        <div className="ml-auto flex items-center gap-2">
+          {canInvite && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              onClick={() => setInviteOpen(true)}
+            >
+              <UserPlus className="mr-1 size-3.5" /> Invite
+            </Button>
+          )}
           <Button
-            size="sm"
-            variant="outline"
-            className="ml-auto h-7"
-            onClick={() => setInviteOpen(true)}
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            onClick={() => setSidebarOpen((v) => !v)}
+            title={sidebarOpen ? "Hide members" : "Show members"}
+            aria-label={sidebarOpen ? "Hide members panel" : "Show members panel"}
+            aria-pressed={sidebarOpen}
           >
-            <UserPlus className="mr-1 size-3.5" /> Invite
+            {sidebarOpen ? (
+              <PanelRightClose className="size-4" />
+            ) : (
+              <PanelRightOpen className="size-4" />
+            )}
           </Button>
-        )}
+        </div>
       </header>
 
       {/* Body: messages | presence */}
@@ -178,16 +253,19 @@ function RoomShell({
           messages={room.messages}
           myId={room.myId}
           onDelete={room.deleteMessage}
+          onAttachmentClick={setModalAttachment}
         />
         <PresenceSidebar
           members={team.members}
           online={room.presence}
           myId={room.myId}
+          open={sidebarOpen}
         />
       </div>
 
       {/* Composer */}
       <Composer
+        ref={composerRef}
         disabled={room.status !== "open"}
         teamId={team.id}
         onSend={(body, atts) => room.send(body, atts)}
@@ -198,6 +276,25 @@ function RoomShell({
         onOpenChange={setInviteOpen}
         teamId={team.id}
       />
+
+      <AttachmentModal
+        attachment={modalAttachment}
+        onClose={() => setModalAttachment(null)}
+      />
+
+      {/* Drag-drop overlay. Pointer-events:none so dragleave still resolves
+          correctly against the underlying shell when the cursor exits. */}
+      {draggingFiles && (
+        <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="rounded-2xl border-2 border-dashed border-primary/60 bg-card/80 px-10 py-8 text-center">
+            <Upload className="mx-auto size-8 text-primary" />
+            <div className="mt-3 text-sm font-medium">Drop to attach</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              Files up to 25 MB
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Quiet the unused-import warning if we ever stop using memberById */}
       <span hidden>{memberById.size}</span>
@@ -240,10 +337,12 @@ function MessageList({
   messages,
   myId,
   onDelete,
+  onAttachmentClick,
 }: {
   messages: ChatMessage[];
   myId: string | null;
   onDelete: (id: string, createdAt: string) => boolean;
+  onAttachmentClick: (a: ChatAttachment) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickyBottomRef = useRef(true);
@@ -294,6 +393,7 @@ function MessageList({
                 compact={Boolean(sameSender)}
                 isMine={isMine}
                 onDelete={isMine ? () => onDelete(m.id, m.createdAt) : undefined}
+                onAttachmentClick={onAttachmentClick}
               />
             );
           })
@@ -308,12 +408,14 @@ function MessageRow({
   compact,
   isMine,
   onDelete,
+  onAttachmentClick,
 }: {
   msg: ChatMessage;
   compact: boolean;
   isMine: boolean;
   /** Provided only when the viewer can delete this message (currently: own messages). */
   onDelete?: () => boolean;
+  onAttachmentClick: (a: ChatAttachment) => void;
 }) {
   function handleDelete() {
     if (!onDelete) return;
@@ -393,7 +495,11 @@ function MessageRow({
             )}
           >
             {msg.attachments.map((a) => (
-              <AttachmentTile key={a.key} attachment={a} />
+              <AttachmentTile
+                key={a.key}
+                attachment={a}
+                onClick={() => onAttachmentClick(a)}
+              />
             ))}
             {/* When there's no body, the trash lives next to the
                 attachments so image-only messages are still deletable. */}
@@ -421,16 +527,22 @@ function DeleteButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function AttachmentTile({ attachment }: { attachment: ChatAttachment }) {
+function AttachmentTile({
+  attachment,
+  onClick,
+}: {
+  attachment: ChatAttachment;
+  onClick: () => void;
+}) {
   const url = attachmentUrl(attachment.key);
   const isImage = attachment.contentType.startsWith("image/");
   if (isImage) {
     return (
-      <a
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        className="block max-w-xs overflow-hidden rounded-md border bg-card"
+      <button
+        type="button"
+        onClick={onClick}
+        title={`${attachment.filename} — open preview`}
+        className="block max-w-xs overflow-hidden rounded-md border bg-card text-left transition hover:ring-2 hover:ring-primary/40"
       >
         {/* Same-origin via the /api/attachments rewrite, so the browser
             sends the session cookie automatically — no crossOrigin needed. */}
@@ -440,21 +552,20 @@ function AttachmentTile({ attachment }: { attachment: ChatAttachment }) {
           alt={attachment.filename}
           className="block max-h-72 w-auto"
         />
-      </a>
+      </button>
     );
   }
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      className="flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs text-foreground/90 hover:bg-card/80"
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${attachment.filename} — open preview`}
+      className="flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs text-foreground/90 transition hover:bg-card/80 hover:ring-2 hover:ring-primary/40"
     >
       <FileIcon className="size-3.5 text-muted-foreground" />
       <span className="max-w-[16rem] truncate">{attachment.filename}</span>
       <span className="text-muted-foreground">{formatBytes(attachment.size)}</span>
-      <Download className="size-3.5 text-muted-foreground" />
-    </a>
+    </button>
   );
 }
 
@@ -477,10 +588,14 @@ function PresenceSidebar({
   members,
   online,
   myId,
+  open,
 }: {
   members: TeamMember[];
   online: Set<string>;
   myId: string | null;
+  /** When false the panel slides closed (width → 0). md+ only; below md the
+   *  panel is hidden regardless to keep the chat usable on phones. */
+  open: boolean;
 }) {
   // Sort: me first, then online, then offline. Within each group, alphabetic.
   const sorted = useMemo(() => {
@@ -497,7 +612,15 @@ function PresenceSidebar({
   }, [members, online, myId]);
 
   return (
-    <aside className="hidden w-56 shrink-0 flex-col border-l bg-sidebar text-sidebar-foreground md:flex">
+    <aside
+      className={cn(
+        // The width transition is the toggle effect. Border + child overflow
+        // are clipped while collapsed so the chat doesn't shift width.
+        "hidden shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground transition-[width,border-left-width] duration-200 md:flex",
+        open ? "w-56 border-l" : "w-0 border-l-0",
+      )}
+      aria-hidden={!open}
+    >
       <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         <Users className="size-3.5" /> Members
         <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-muted-foreground">
@@ -569,15 +692,22 @@ interface PendingAttachment {
   error?: string;
 }
 
-function Composer({
-  disabled,
-  teamId,
-  onSend,
-}: {
+/** Imperative surface RoomShell uses to forward dropped files into the
+ *  composer's existing upload pipeline. */
+interface ComposerHandle {
+  addFiles: (files: Iterable<File>) => void;
+}
+
+interface ComposerProps {
   disabled: boolean;
   teamId: string;
   onSend: (body: string, attachments?: ChatAttachment[]) => boolean;
-}) {
+}
+
+const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
+  { disabled, teamId, onSend },
+  ref,
+) {
   const [value, setValue] = useState("");
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -606,33 +736,46 @@ function Composer({
     ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
   }, [value]);
 
-  async function handleFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const additions: PendingAttachment[] = Array.from(files).map((f) => ({
-      id: crypto.randomUUID(),
-      file: f,
-      status: "uploading",
-    }));
-    setPending((prev) => [...prev, ...additions]);
+  const handleFiles = useCallback(
+    async (files: Iterable<File> | null) => {
+      if (!files) return;
+      const list = Array.from(files);
+      if (list.length === 0) return;
+      const additions: PendingAttachment[] = list.map((f) => ({
+        id: crypto.randomUUID(),
+        file: f,
+        status: "uploading",
+      }));
+      setPending((prev) => [...prev, ...additions]);
 
-    for (const item of additions) {
-      try {
-        const attachment = await teamsApi.uploadAttachment(teamId, item.file);
-        setPending((prev) =>
-          prev.map((p) =>
-            p.id === item.id ? { ...p, status: "done", attachment } : p,
-          ),
-        );
-      } catch (e) {
-        const message = e instanceof Error ? e.message : "Upload failed";
-        setPending((prev) =>
-          prev.map((p) =>
-            p.id === item.id ? { ...p, status: "error", error: message } : p,
-          ),
-        );
+      for (const item of additions) {
+        try {
+          const attachment = await teamsApi.uploadAttachment(teamId, item.file);
+          setPending((prev) =>
+            prev.map((p) =>
+              p.id === item.id ? { ...p, status: "done", attachment } : p,
+            ),
+          );
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Upload failed";
+          setPending((prev) =>
+            prev.map((p) =>
+              p.id === item.id ? { ...p, status: "error", error: message } : p,
+            ),
+          );
+        }
       }
-    }
-  }
+    },
+    [teamId],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      addFiles: (files) => void handleFiles(files),
+    }),
+    [handleFiles],
+  );
 
   return (
     <div className="shrink-0 border-t bg-background p-3">
@@ -691,12 +834,12 @@ function Composer({
           </Button>
         </div>
         <div className="mt-1 text-[10px] text-muted-foreground">
-          Enter sends · Shift+Enter for newline · attach files up to 25 MB
+          Enter sends · Shift+Enter for newline · drag &amp; drop files anywhere · 25 MB max
         </div>
       </div>
     </div>
   );
-}
+});
 
 function PendingChip({
   pending,
