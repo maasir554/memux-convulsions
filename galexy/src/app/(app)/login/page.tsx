@@ -12,13 +12,27 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 import { authClient, useSession } from "@/lib/auth/client";
 
+/**
+ * The page is wrapped in <Suspense> because `useSearchParams()` triggers a
+ * client-side rendering bailout for the subtree below it. Without the
+ * boundary, Next 16's production build fails with "Missing Suspense
+ * boundary with useSearchParams" when prerendering /login.
+ */
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginShell pending />}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") ?? "/";
@@ -55,6 +69,40 @@ export default function LoginPage() {
   }
 
   return (
+    <LoginShell pending={submitting || isPending}>
+      <button
+        type="button"
+        onClick={handleGoogle}
+        disabled={submitting || isPending}
+        className="flex w-full items-center justify-center gap-3 rounded-lg border bg-card px-4 py-3 text-sm font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-card/80 disabled:opacity-60"
+      >
+        {submitting ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <GoogleMark />
+        )}
+        Continue with Google
+      </button>
+      {error && (
+        <p className="mt-4 text-center text-xs text-destructive">{error}</p>
+      )}
+    </LoginShell>
+  );
+}
+
+/**
+ * Visual shell shared by the suspense fallback and the resolved form.
+ * Rendering the same chrome in both states avoids a layout flash during
+ * hydration.
+ */
+function LoginShell({
+  children,
+  pending,
+}: {
+  children?: React.ReactNode;
+  pending?: boolean;
+}) {
+  return (
     <div className="flex flex-1 items-center justify-center bg-background p-8">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
@@ -69,23 +117,11 @@ export default function LoginPage() {
             this device stays local either way.
           </p>
         </div>
-
-        <button
-          type="button"
-          onClick={handleGoogle}
-          disabled={submitting || isPending}
-          className="flex w-full items-center justify-center gap-3 rounded-lg border bg-card px-4 py-3 text-sm font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-card/80 disabled:opacity-60"
-        >
-          {submitting ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <GoogleMark />
-          )}
-          Continue with Google
-        </button>
-
-        {error && (
-          <p className="mt-4 text-center text-xs text-destructive">{error}</p>
+        {children ?? (
+          <div className="flex w-full items-center justify-center rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
+            <Loader2 className="mr-2 size-4 animate-spin" />
+            {pending ? "Checking session…" : "Loading…"}
+          </div>
         )}
       </div>
     </div>
