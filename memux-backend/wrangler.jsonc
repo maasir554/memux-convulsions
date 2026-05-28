@@ -11,7 +11,7 @@
     {
       "binding": "DB",
       "database_name": "memux",
-      "database_id": "REPLACE_WITH_D1_ID",
+      "database_id": "96176247-ca7c-4d49-bf49-0e839624ac5d",
       "migrations_dir": "src/db/migrations"
     }
   ],

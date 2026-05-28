@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { FilePlus, MessageSquare, FolderOpen } from "lucide-react";
 
+import { AccountChip } from "@/components/auth/account-chip";
 import { cn } from "@/lib/utils";
 
 const TILES = [
@@ -29,7 +30,10 @@ const TILES = [
 
 export default function MemuxHome() {
   return (
-    <div className="flex flex-1 items-center justify-center bg-background p-8">
+    <div className="relative flex flex-1 items-center justify-center bg-background p-8">
+      <div className="absolute top-4 right-6">
+        <AccountChip />
+      </div>
       <div className="w-full max-w-4xl">
         <div className="mb-10 text-center">
           <p className="text-xs font-semibold tracking-[0.2em] text-muted-foreground uppercase">
