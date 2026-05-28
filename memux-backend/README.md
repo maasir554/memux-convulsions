@@ -61,13 +61,43 @@ npm run dev    # http://localhost:8787
 Quick smoke test:
 
 ```bash
+# 1. Liveness
 curl http://localhost:8787/healthz                # { ok: true }
-curl -i http://localhost:8787/api/me              # 401 — no session
-open  http://localhost:8787/api/auth/sign-in/social?provider=google
-                                                   # → Google consent → callback → cookie set
-curl --cookie-jar cookies.txt http://localhost:8787/api/me
-                                                   # → user record
+
+# 2. No session yet
+curl -i http://localhost:8787/api/me              # 401 — { user: null }
+
+# 3. Kick off Google OAuth.
+#
+#    DO NOT use curl + open. Better-Auth sets a `state` cookie on the
+#    POST response which the OAuth callback verifies — and that cookie
+#    must live in the BROWSER, not in a curl cookie jar. If you split
+#    the flow (curl POST + browser redirect), you'll get
+#    `state_mismatch` on the callback.
+#
+#    Instead, open http://localhost:8787/healthz (or any same-origin
+#    page) and paste this into DevTools → Console:
+#
+#      const r = await fetch('/api/auth/sign-in/social', {
+#        method: 'POST',
+#        headers: { 'Content-Type': 'application/json' },
+#        credentials: 'include',
+#        body: JSON.stringify({ provider: 'google', callbackURL: '/api/me' }),
+#      });
+#      window.location = (await r.json()).url;
+#
+#    The fetch sets the state cookie in your browser, then redirects
+#    you to Google → callback → session created → callbackURL.
+
+# 4. In the same browser, visit http://localhost:8787/api/me to confirm
+#    the session cookie persists across reloads.
 ```
+
+Better-Auth endpoints (all under `/api/auth/`):
+- `POST /sign-in/social`     start an OAuth flow → returns `{ url }`
+- `GET  /callback/google`    Google redirects here with `?code=…`
+- `POST /sign-out`           clear session cookie
+- `GET  /get-session`        same data as our `/api/me` proxy
 
 ## Cross-origin from galexy
 
