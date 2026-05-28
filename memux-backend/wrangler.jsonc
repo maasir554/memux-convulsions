@@ -78,7 +78,13 @@
     "production": {
       "name": "memux-backend",
       "vars": {
-        "BETTER_AUTH_URL": "https://memux-backend.maasir554.workers.dev",
+        // Vercel rewrites proxy /api/auth/* + /api/me + /api/teams + /api/attachments
+        // through this Worker, so all HTTP auth surface is same-origin to the
+        // browser as memux-convulsions.vercel.app. BETTER_AUTH_URL must match the
+        // origin the browser sees (it's what Better-Auth uses to build the
+        // redirect_uri sent to Google) — so it points at vercel.app, not workers.dev.
+        // TRUSTED_ORIGINS is the same value: the only origin we accept fetches from.
+        "BETTER_AUTH_URL": "https://memux-convulsions.vercel.app",
         "TRUSTED_ORIGINS": "https://memux-convulsions.vercel.app"
       },
       "d1_databases": [

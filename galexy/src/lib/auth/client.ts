@@ -1,22 +1,30 @@
 /**
  * Better-Auth client for memux-backend.
  *
- * Reads NEXT_PUBLIC_MEMUX_API_URL from the env (set in .env.local). All
- * requests go cross-origin to the Worker; the client forwards credentials
- * so the session cookie flows both directions.
+ * Talks to the backend via SAME-ORIGIN paths (/api/auth/*). next.config.ts
+ * rewrites those to the Worker. This is what makes the session cookie
+ * first-party to the frontend origin in production — without it, vercel.app
+ * fetching workers.dev would set a third-party cookie that modern browsers
+ * routinely drop (Chrome tracking protection, Safari ITP, public-suffix
+ * rules on .vercel.app).
  *
- * Locally, localhost:3000 ↔ localhost:8787 are same-site (just different
- * ports), so SameSite=Lax cookies set by the Worker reach the browser on
- * cross-origin fetches. In production (Vercel ↔ workers.dev / custom),
- * the Worker switches to SameSite=None; Secure automatically.
+ * `credentials: "include"` is still useful: with an absolute baseURL, fetch
+ * defaults to omitting cookies in some setups. We force-include and rely on
+ * the browser treating them as first-party because the URL's host is the
+ * page's own host.
  */
 
 "use client";
 
 import { createAuthClient } from "better-auth/react";
 
+// Use the current origin as baseURL in the browser. During SSR (window
+// undefined) we fall back to a placeholder; the auth client is only
+// invoked from client code so the SSR value is never actually used.
 const baseURL =
-  process.env.NEXT_PUBLIC_MEMUX_API_URL ?? "http://localhost:8787";
+  typeof window !== "undefined"
+    ? window.location.origin
+    : "http://localhost:3000";
 
 export const authClient = createAuthClient({
   baseURL,

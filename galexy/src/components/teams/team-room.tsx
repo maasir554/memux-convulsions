@@ -432,14 +432,12 @@ function AttachmentTile({ attachment }: { attachment: ChatAttachment }) {
         rel="noreferrer"
         className="block max-w-xs overflow-hidden rounded-md border bg-card"
       >
-        {/* crossorigin=use-credentials so the browser sends the session
-            cookie on the image GET (which is a cross-origin request:
-            galexy:3000 → memux-backend:8787 in dev). */}
+        {/* Same-origin via the /api/attachments rewrite, so the browser
+            sends the session cookie automatically — no crossOrigin needed. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={url}
           alt={attachment.filename}
-          crossOrigin="use-credentials"
           className="block max-h-72 w-auto"
         />
       </a>

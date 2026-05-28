@@ -21,6 +21,7 @@ import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { team, teamInvite, teamMember, user } from "../db/schema";
 import { getDb } from "../lib/db";
 import { genId, genInviteCode } from "../lib/ids";
+import { signWsToken, tokenExpiry } from "../lib/ws-token";
 import { requireUser, type AuthedVariables } from "../middleware/auth";
 import { teamAttachmentsRouter } from "./attachments";
 import type { WorkerEnv } from "../env";
@@ -369,7 +370,30 @@ function withUserHeaders(headers: Headers, user: { id: string; name: string; ima
   return h;
 }
 
+// GET /api/teams/:id/ws-token — mint a short-lived signed token the browser
+// uses to authenticate the WebSocket upgrade. This endpoint sits behind
+// session auth (HTTP, cookie reaches it via the Vercel rewrite); the token
+// it returns survives a direct cross-origin WS connection to workers.dev.
+teams.get("/:id/ws-token", async (c) => {
+  const me = c.var.user;
+  const teamId = c.req.param("id");
+  const role = await getMembership(c.env, teamId, me.id);
+  if (!role) return c.json({ error: "not a member" }, 404);
+
+  const exp = tokenExpiry();
+  const token = await signWsToken(c.env.BETTER_AUTH_SECRET, {
+    teamId,
+    userId: me.id,
+    userName: me.name,
+    userImage: me.image,
+    exp,
+  });
+  return c.json({ token, expiresAt: new Date(exp * 1000).toISOString() });
+});
+
 // GET /api/teams/:id/ws — WebSocket upgrade into the TeamRoom DO.
+// Auth: either the session cookie OR `?ws_token=` issued above. See the
+// requireUser middleware for the dispatch logic.
 teams.get("/:id/ws", async (c) => {
   const me = c.var.user;
   const teamId = c.req.param("id");

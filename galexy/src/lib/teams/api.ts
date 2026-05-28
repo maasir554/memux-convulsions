@@ -19,7 +19,22 @@ import type {
   TeamSummary,
 } from "./types";
 
-export const baseURL =
+/**
+ * Empty baseURL → relative URLs → same-origin requests against Next, which
+ * proxies them to the Worker via next.config.ts rewrites. Keeps the session
+ * cookie first-party to the Vercel origin in production.
+ *
+ * Only the WebSocket URL (teamRoomWsUrl below) uses the absolute Worker
+ * URL — Vercel rewrites can't proxy WS upgrades, so the WS connects direct.
+ */
+export const baseURL = "";
+
+/**
+ * Absolute Worker URL — used only by the WebSocket client. Read from the
+ * public env so the same value lands in the build and matches whatever
+ * next.config.ts uses for HTTP rewrites.
+ */
+const wsApiBase =
   process.env.NEXT_PUBLIC_MEMUX_API_URL ?? "http://localhost:8787";
 
 export class ApiError extends Error {
@@ -129,6 +144,15 @@ export const teamsApi = {
       { body },
     ),
 
+  // Mint a short-lived WS auth token. The cookie reaches this endpoint
+  // (same-origin via the rewrite), and the returned token is what the
+  // WebSocket itself uses for auth on its direct workers.dev connection.
+  wsToken: (teamId: string) =>
+    request<{ token: string; expiresAt: string }>(
+      "GET",
+      `/api/teams/${teamId}/ws-token`,
+    ),
+
   // Upload a single file. The Worker enforces size + membership.
   // Multipart isn't a JSON body so we bypass the shared request() helper.
   uploadAttachment: async (teamId: string, file: File): Promise<ChatAttachment> => {
@@ -158,9 +182,12 @@ export function attachmentUrl(key: string): string {
 }
 
 /**
- * Browser WebSocket URL for the TeamRoom DO. Converts `http(s)://...` →
- * `ws(s)://...` and appends the path.
+ * Browser WebSocket URL for the TeamRoom DO. Uses the absolute Worker URL
+ * (not the same-origin proxy) because Vercel rewrites can't proxy WebSocket
+ * upgrades. Auth piggybacks on the `ws_token` query the caller appends
+ * after fetching it from `teamsApi.wsToken(teamId)`.
  */
-export function teamRoomWsUrl(teamId: string): string {
-  return `${baseURL.replace(/^http/, "ws")}/api/teams/${teamId}/ws`;
+export function teamRoomWsUrl(teamId: string, wsToken: string): string {
+  const base = wsApiBase.replace(/^http/, "ws");
+  return `${base}/api/teams/${teamId}/ws?ws_token=${encodeURIComponent(wsToken)}`;
 }

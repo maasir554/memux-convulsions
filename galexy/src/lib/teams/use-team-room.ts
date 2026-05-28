@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { teamRoomWsUrl } from "./api";
+import { teamRoomWsUrl, teamsApi } from "./api";
 import type { ChatAttachment, ChatMessage } from "./types";
 
 export type RoomStatus = "connecting" | "open" | "closed" | "error";
@@ -71,11 +71,29 @@ export function useTeamRoom(teamId: string | null): TeamRoomState {
 
     let cancelled = false;
 
-    function connect() {
+    async function connect() {
       if (cancelled) return;
       setStatus("connecting");
 
-      const ws = new WebSocket(teamRoomWsUrl(teamId!));
+      // Mint a fresh WS token (60s TTL) before each (re)connect. The
+      // request is same-origin via the Vercel rewrite so the session cookie
+      // reaches the Worker; the returned token is what the WS itself uses.
+      let token: string;
+      try {
+        const res = await teamsApi.wsToken(teamId!);
+        token = res.token;
+      } catch {
+        if (cancelled) return;
+        setStatus("error");
+        // Schedule a retry under the same backoff as a WS close.
+        const delay = reconnectMs.current;
+        reconnectMs.current = Math.min(delay * 2, RECONNECT_MAX_MS);
+        reconnectTimer.current = setTimeout(connect, delay);
+        return;
+      }
+      if (cancelled) return;
+
+      const ws = new WebSocket(teamRoomWsUrl(teamId!, token));
       wsRef.current = ws;
 
       const pingTimer = setInterval(() => {
@@ -140,7 +158,7 @@ export function useTeamRoom(teamId: string | null): TeamRoomState {
       });
     }
 
-    connect();
+    void connect();
 
     return () => {
       cancelled = true;
