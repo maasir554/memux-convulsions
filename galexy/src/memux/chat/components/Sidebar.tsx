@@ -34,7 +34,7 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
     <aside className="hidden md:flex w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
       <div className="flex items-center gap-2 px-3 py-3">
         <Link
-          href="/memux"
+          href="/"
           aria-label="Back to MEMUX dashboard"
           className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
         >

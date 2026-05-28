@@ -1119,7 +1119,7 @@ async function runUserCapture(
       shots: screenshots.length,
     });
     // Try to ship to a galexy tab right away. Silently no-ops if no galexy
-    // tab is open / not on /memux/index.
+    // tab is open / not on /index.
     void dispatchPendingToGalexy();
     // Dismiss the on-page capture ring.
     void chrome.tabs
@@ -1478,7 +1478,7 @@ let dispatchInflight = false;
  * stale tabs would silently fail. Programmatic injection always works.
  *
  * Captures that get ack'd are flagged delivered=true and won't re-send.
- * If no galexy tab is open, or it's not on /memux/index, captures sit in
+ * If no galexy tab is open, or it's not on /index, captures sit in
  * the outbox until the next trigger.
  */
 async function dispatchPendingToGalexy(): Promise<void> {
@@ -1570,7 +1570,7 @@ function deliverInPage(payload: MemuxOutboundCapture[]): Promise<string[]> {
       { type: "memux.worksmith.captures", payload },
       window.location.origin,
     );
-    // Galexy has 3s to ack; if not (e.g. not on /memux/index), retry next trigger.
+    // Galexy has 3s to ack; if not (e.g. not on /index), retry next trigger.
     setTimeout(finish, 3000);
   });
 }

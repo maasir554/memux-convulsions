@@ -30,7 +30,7 @@ import { ViewerFallback } from "@/components/galexy/viewers/viewer-fallback";
 import type { Note, PdfAnnotation } from "@/lib/mock-notes";
 
 // react-pdf's src/index.ts hardcodes a default workerSrc of `pdf.worker.mjs`
-// (a relative path that 404s at /memux/chat → fake worker fallback → blank
+// (a relative path that 404s at /chat → fake worker fallback → blank
 // image-heavy pages). Force-override unconditionally and let Turbopack emit
 // the worker file as a bundled asset, so the URL is guaranteed correct and
 // doesn't depend on Next's public/ routing or MIME-type guessing.

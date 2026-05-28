@@ -26,7 +26,7 @@ import type { IndexerDomImage } from "@/lib/db/schema";
  * The pruned accessibility tree is appended to the group's prompt as JSON so
  * the Visioner has it as supplementary context.
  *
- * The bridge is mounted on /memux/index only. If the page isn't open, the
+ * The bridge is mounted on /index only. If the page isn't open, the
  * extension queues captures locally and retries when galexy is reopened.
  */
 

@@ -56,7 +56,7 @@ export function MemuxIndexPage() {
     <div className="flex h-full flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <Link
-          href="/memux"
+          href="/"
           className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
         >
           <ArrowLeft className="size-3.5" />
@@ -87,7 +87,7 @@ export function MemuxIndexPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/vault")}
             className="h-7"
           >
             Browse vault

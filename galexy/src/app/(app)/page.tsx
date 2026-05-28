@@ -5,23 +5,23 @@ import { cn } from "@/lib/utils";
 
 const TILES = [
   {
-    href: "/memux/index",
+    href: "/index",
     label: "Index",
     sub: "Drop files, add context, build a searchable index.",
     Icon: FilePlus,
     accent: "bg-amber-500/10 text-amber-400 ring-amber-500/20",
   },
   {
-    href: "/memux/chat",
+    href: "/chat",
     label: "Chat",
     sub: "Talk to a local model. Streams from Plasma's backend.",
     Icon: MessageSquare,
     accent: "bg-emerald-500/10 text-emerald-400 ring-emerald-500/20",
   },
   {
-    href: "/",
+    href: "/vault",
     label: "Browse",
-    sub: "Open the galexy vault: notes, sheets, PDFs, graph.",
+    sub: "Open the vault: notes, sheets, PDFs, graph.",
     Icon: FolderOpen,
     accent: "bg-violet-500/10 text-violet-400 ring-violet-500/20",
   },
