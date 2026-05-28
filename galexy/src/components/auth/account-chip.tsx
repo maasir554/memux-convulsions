@@ -58,6 +58,11 @@ export function AccountChip() {
         <img
           src={user.image}
           alt=""
+          // Google's avatar CDN (lh3.googleusercontent.com) rate-limits per
+          // Referer host. In dev, React StrictMode + HMR bursts requests
+          // quickly enough to trip 429s. Sending no Referer makes Google
+          // serve the image like any anonymous view.
+          referrerPolicy="no-referrer"
           className="size-7 rounded-full ring-1 ring-border"
         />
       ) : (
