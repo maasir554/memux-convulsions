@@ -1,113 +1,74 @@
 "use client";
 
 /**
- * Right-side activity panel for the agentic chat.
+ * Right-side activity stream for the agentic chat.
  *
- * Three regions:
- *   1. Header — status pill + reasoning teaser.
- *   2. Activity timeline — every tool step this turn, click to focus.
- *   3. Focused step view — the ToolView for whichever step is selected.
- *      Defaults to the most recent step; the user can lock onto an
- *      earlier one to read it in detail.
- *
- * Plus a collapsible scratchpad footer showing the top candidates by
- * RRF score so the user can see what the agent is converging on.
+ * Design intent (design-engineer notes):
+ *   - SINGLE column. No timeline + detail split. Less visual noise.
+ *   - Each ActivityCard fades-in-up with a small stagger so the stream
+ *     reads as a calm, considered build-up rather than a strobing wall.
+ *   - Cards are visual-first: thumbnails, icons, link chips. Text is
+ *     used sparingly — the chat answer below is where prose lives.
+ *   - Auto-scrolls to the newest card unless the user has scrolled up
+ *     to inspect history (the agent shouldn't fight your reading).
+ *   - Header carries a status pill + close. Shortlist surfaces as a
+ *     pinned card at the top of the stream when something's in it.
  */
 
-import { useState } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  CircleCheck,
-  CircleAlert,
-  Loader2,
-  Sparkles,
-} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Sparkles, X, CheckCircle2, CircleAlert, Loader2, ListChecks } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { useAgentStore, type ActivityStep } from "@/memux/chat/lib/agent-store";
-import { ToolView } from "@/memux/chat/components/tool-views/ToolView";
-import type { ToolName } from "@/lib/chat/types";
-
-const TOOL_LABEL: Record<ToolName, string> = {
-  search_keyword: "Keyword search",
-  search_semantic: "Semantic search",
-  search_combined: "Combined search",
-  search_concept: "Concept search",
-  find_by_date_range: "Date range",
-  dates_in_content: "Dates in content",
-  get_backlinks: "Backlinks",
-  get_outlinks: "Outlinks",
-  get_folder_contents: "Folder contents",
-  expand_neighborhood: "Neighborhood",
-  get_item: "Read item",
-  get_annotations: "Annotations",
-  read_section: "Read section",
-  read_pdf_page: "Read PDF page",
-  read_image: "Read image",
-  read_csv: "Read CSV",
-  list_concepts: "List concepts",
-  get_concept: "Concept detail",
-  find_evidence: "Find evidence",
-  find_image_region: "Find image region",
-  get_section_links: "Section links",
-  query_section_tree: "Query a11y tree",
-};
+import { useAgentStore } from "@/memux/chat/lib/agent-store";
+import { ActivityCard } from "@/memux/chat/components/activity/ActivityCard";
+import type { Candidate } from "@/lib/chat/types";
 
 export function AgentPanel({ onClose }: { onClose?: () => void }) {
   const status = useAgentStore((s) => s.status);
   const steps = useAgentStore((s) => s.steps);
-  const focusedStepId = useAgentStore((s) => s.focusedStepId);
   const reasoningStream = useAgentStore((s) => s.reasoningStream);
   const shortlist = useAgentStore((s) => s.shortlist);
-  const focusStep = useAgentStore((s) => s.focusStep);
-
-  const focused = steps.find((s) => s.stepId === focusedStepId) ?? steps[steps.length - 1];
-  const focusedPayload = focused?.result?.ok ? focused.result.ui : null;
 
   return (
-    <aside className="flex h-full w-full flex-col border-l border-border bg-gradient-to-b from-background to-card/50">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
-        <Sparkles className="size-3.5 text-primary" />
-        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Agent
+    <aside className="flex h-full w-full flex-col border-l border-border bg-gradient-to-b from-background to-card/40">
+      <Header status={status} onClose={onClose} />
+      {reasoningStream && (
+        <div className="border-b border-border/40 bg-muted/10 px-4 py-2 text-[11px] italic leading-snug text-muted-foreground">
+          {reasoningStream.slice(-220)}
         </div>
-        <StatusPill status={status} />
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="ml-auto rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-            type="button"
-          >
-            Close
-          </button>
-        )}
-      </header>
-
-      <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto]">
-        {/* Reasoning teaser */}
-        {reasoningStream && (
-          <div className="border-b border-border/60 bg-muted/20 px-3 py-2 text-[11px] italic text-muted-foreground">
-            {reasoningStream.slice(-240)}
-          </div>
-        )}
-
-        {/* Main: timeline on the left, focused view on the right */}
-        <div className="grid min-h-0 grid-cols-[180px_minmax(0,1fr)]">
-          <ActivityTimeline
-            steps={steps}
-            focusedStepId={focused?.stepId ?? null}
-            onSelect={focusStep}
-          />
-          <div className="min-h-0 overflow-hidden">
-            <ToolView payload={focusedPayload} />
-          </div>
-        </div>
-
-        {/* Shortlist footer */}
-        <ShortlistStrip shortlist={shortlist} />
-      </div>
+      )}
+      <ActivityStream steps={steps} shortlist={shortlist} />
     </aside>
+  );
+}
+
+/* ------------------------------------------------------------- header */
+
+function Header({
+  status,
+  onClose,
+}: {
+  status: "idle" | "running" | "done" | "error";
+  onClose?: () => void;
+}) {
+  return (
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/50 px-3.5">
+      <Sparkles className="size-3.5 text-primary" aria-hidden />
+      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Agent
+      </div>
+      <StatusPill status={status} />
+      {onClose && (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close agent panel"
+          className="ml-auto rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
+    </header>
   );
 }
 
@@ -115,130 +76,134 @@ function StatusPill({ status }: { status: "idle" | "running" | "done" | "error" 
   if (status === "idle") return null;
   const cfg =
     status === "running"
-      ? { label: "Running", cls: "bg-primary/15 text-primary", icon: <Loader2 className="size-3 animate-spin" /> }
+      ? {
+          label: "Working",
+          cls: "border-primary/30 bg-primary/10 text-primary",
+          icon: <Loader2 className="size-3 animate-spin" />,
+        }
       : status === "done"
-        ? { label: "Done", cls: "bg-emerald-500/15 text-emerald-300", icon: <CircleCheck className="size-3" /> }
-        : { label: "Error", cls: "bg-destructive/15 text-destructive", icon: <CircleAlert className="size-3" /> };
+        ? {
+            label: "Done",
+            cls: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+            icon: <CheckCircle2 className="size-3" />,
+          }
+        : {
+            label: "Error",
+            cls: "border-destructive/30 bg-destructive/10 text-destructive",
+            icon: <CircleAlert className="size-3" />,
+          };
   return (
-    <span className={cn("ml-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium", cfg.cls)}>
+    <span
+      className={cn(
+        "ml-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+        cfg.cls,
+      )}
+    >
       {cfg.icon}
       {cfg.label}
     </span>
   );
 }
 
-function ActivityTimeline({
+/* -------------------------------------------------- activity stream */
+
+function ActivityStream({
   steps,
-  focusedStepId,
-  onSelect,
+  shortlist,
 }: {
-  steps: ActivityStep[];
-  focusedStepId: string | null;
-  onSelect: (id: string) => void;
+  steps: ReturnType<typeof useAgentStore.getState>["steps"];
+  shortlist: Candidate[];
 }) {
-  if (steps.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center border-r border-border/60 px-2 text-center text-[11px] text-muted-foreground/70">
-        No steps yet.
-      </div>
-    );
-  }
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [autoFollow, setAutoFollow] = useState(true);
+
+  // Detect user-driven scroll — once they scroll away from the bottom
+  // we stop auto-following so we don't yank them back when a new card
+  // lands. Re-snap when they scroll back to within 40px of the bottom.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const dist = el.scrollHeight - (el.scrollTop + el.clientHeight);
+      setAutoFollow(dist < 40);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!autoFollow) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    // Use rAF so the new card's fade-in-up animation has its initial
+    // frame committed before we scroll — otherwise we'd snap past the
+    // entrance and the user would never see the lift.
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    });
+  }, [steps.length, autoFollow]);
+
   return (
-    <div className="flex min-h-0 flex-col gap-1 overflow-y-auto border-r border-border/60 p-1.5">
-      {steps.map((s, i) => (
-        <button
-          key={s.stepId}
-          type="button"
-          onClick={() => onSelect(s.stepId)}
-          className={cn(
-            "group/step flex items-start gap-1.5 rounded-md border border-transparent px-2 py-1.5 text-left text-[11px] transition-colors",
-            s.stepId === focusedStepId
-              ? "border-border bg-muted/60 text-foreground"
-              : "text-muted-foreground hover:bg-muted/30",
-          )}
-        >
-          <StepStatusDot status={s.status} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1">
-              <span className="font-mono text-[9px] text-muted-foreground/60">
-                {String(i + 1).padStart(2, "0")}
-              </span>
-              <span className="truncate font-medium">{TOOL_LABEL[s.tool] ?? s.tool}</span>
-            </div>
-            <div className="mt-0.5 truncate text-[10px] text-muted-foreground/70">
-              {summariseArgs(s.args)}
-            </div>
-            {s.result?.ok && (
-              <div className="mt-0.5 truncate text-[10px] text-muted-foreground/50">
-                {s.result.refs.length} ref{s.result.refs.length === 1 ? "" : "s"}
-              </div>
-            )}
-            {s.result && !s.result.ok && (
-              <div className="mt-0.5 truncate text-[10px] text-destructive/80">
-                error
-              </div>
-            )}
-          </div>
-        </button>
-      ))}
+    <div
+      ref={scrollRef}
+      className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-3.5 py-3.5"
+    >
+      {shortlist.length > 0 && <ShortlistCard shortlist={shortlist} />}
+      {steps.length === 0 ? (
+        <EmptyState />
+      ) : (
+        steps.map((s, i) => <ActivityCard key={s.stepId} step={s} index={i} />)
+      )}
     </div>
   );
 }
 
-function StepStatusDot({ status }: { status: ActivityStep["status"] }) {
-  const cls =
-    status === "running"
-      ? "border-primary bg-primary/40 animate-pulse"
-      : status === "ok"
-        ? "border-emerald-400/80 bg-emerald-400/40"
-        : "border-destructive/60 bg-destructive/30";
+function EmptyState() {
   return (
-    <span className={cn("mt-1 size-2 shrink-0 rounded-full border", cls)} aria-hidden />
+    <div className="ws-card-enter flex flex-col items-center justify-center gap-2 py-12 text-center">
+      <Sparkles className="size-5 text-muted-foreground/40" aria-hidden />
+      <div className="text-[11px] text-muted-foreground/70">
+        Ask the assistant a question — the search will appear here.
+      </div>
+    </div>
   );
 }
 
-function summariseArgs(args: unknown): string {
-  if (!args || typeof args !== "object") return "";
-  const obj = args as Record<string, unknown>;
-  if (typeof obj.query === "string") return `"${obj.query}"`;
-  if (typeof obj.itemId === "string") return obj.itemId;
-  if (typeof obj.folderPath === "string") return obj.folderPath;
-  if (typeof obj.name === "string") return obj.name;
-  return Object.keys(obj).slice(0, 2).join(", ") || "";
-}
+/* ----------------------------------------------- shortlist card */
 
-function ShortlistStrip({ shortlist }: { shortlist: { itemId: string; title: string; score: number }[] }) {
-  const [open, setOpen] = useState(true);
-  if (shortlist.length === 0) return null;
+function ShortlistCard({ shortlist }: { shortlist: Candidate[] }) {
+  const top = shortlist.slice(0, 6);
   return (
-    <div className="shrink-0 border-t border-border/60 bg-muted/10">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-      >
-        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        Shortlist
-        <span className="ml-auto font-mono text-muted-foreground/70">{shortlist.length}</span>
-      </button>
-      {open && (
-        <div className="flex max-h-32 flex-col gap-0.5 overflow-y-auto px-3 pb-2">
-          {shortlist.map((c, i) => (
-            <div
-              key={c.itemId}
-              className="flex items-center gap-2 rounded px-1 py-0.5 text-[11px] text-foreground/85"
-            >
-              <span className="font-mono text-[9px] text-muted-foreground/60">
-                #{i + 1}
-              </span>
-              <span className="min-w-0 flex-1 truncate">{c.title}</span>
-              <span className="shrink-0 rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
-                {c.score.toFixed(2)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+    <div
+      className="ws-card-enter sticky top-0 z-10 rounded-xl border border-border/40 bg-card/80 px-3.5 py-2.5 backdrop-blur"
+      style={{ animationDelay: "0ms" }}
+    >
+      <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+        <ListChecks className="size-3.5 text-primary" aria-hidden />
+        <span>Shortlist</span>
+        <span className="ml-auto font-mono text-foreground/80">{shortlist.length}</span>
+      </div>
+      <div className="mt-2 flex flex-col gap-0.5">
+        {top.map((c, i) => (
+          <div
+            key={c.itemId}
+            className="flex items-center gap-1.5 text-[11px] leading-relaxed text-foreground/85"
+          >
+            <span className="w-4 shrink-0 text-right font-mono text-[9px] text-muted-foreground/60">
+              {i + 1}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{c.title}</span>
+            <span className="shrink-0 rounded bg-muted/40 px-1 py-px font-mono text-[9px] text-muted-foreground">
+              {c.score.toFixed(2)}
+            </span>
+          </div>
+        ))}
+        {shortlist.length > top.length && (
+          <div className="mt-0.5 text-[10px] text-muted-foreground/60">
+            +{shortlist.length - top.length} more
+          </div>
+        )}
+      </div>
     </div>
   );
 }

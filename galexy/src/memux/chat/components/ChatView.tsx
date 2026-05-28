@@ -6,6 +6,7 @@ import { Brain, Database, Sparkles, Wand2 } from "lucide-react";
 import { runChatTurn } from "@/lib/chat/harness/orchestrator";
 import { useAgentStore } from "@/memux/chat/lib/agent-store";
 import { AgentPanel } from "@/memux/chat/components/AgentPanel";
+import { ChatThinkingBanner } from "@/memux/chat/components/ChatThinkingBanner";
 import {
   Conversation,
   ConversationContent,
@@ -341,6 +342,7 @@ export function ChatView({
                 think mode is on for this turn
               </div>
             )}
+            {kbMode && <ChatThinkingBanner />}
           </ConversationContent>
         )}
       </Conversation>
