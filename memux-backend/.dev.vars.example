@@ -1,0 +1,11 @@
+# Copy to .dev.vars (gitignored) and fill in real values for `wrangler dev`.
+# For production: `wrangler secret put <NAME>` instead.
+
+# 32+ char random string. Generate with: openssl rand -base64 32
+BETTER_AUTH_SECRET=
+
+# From https://console.cloud.google.com/apis/credentials
+# Create an OAuth 2.0 Client ID (type: Web application).
+# Authorised redirect URI (dev): http://localhost:8787/api/auth/callback/google
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=

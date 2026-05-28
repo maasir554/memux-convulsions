@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "memux-backend",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // D1 database for users / sessions / teams / memberships / invites.
+  // Run `wrangler d1 create memux` once, then paste the database_id here.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "memux",
+      "database_id": "REPLACE_WITH_D1_ID",
+      "migrations_dir": "src/db/migrations"
+    }
+  ],
+
+  // Non-secret vars. Secrets live in .dev.vars (local) and
+  // `wrangler secret put` (remote): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+  // BETTER_AUTH_SECRET.
+  "vars": {
+    "BETTER_AUTH_URL": "http://localhost:8787",
+    "TRUSTED_ORIGINS": "http://localhost:3000"
+  }
+
+  // Durable Objects land in Phase 4 (TeamRoom). Keeping the block out of
+  // wrangler.jsonc until then so deploys don't fail on a missing class.
+}

@@ -137,12 +137,27 @@ export function AppShell() {
   const outgoing = activeId ? resolve(linkGraph.outgoing[activeId] ?? []) : [];
 
   const folderChildren = useMemo(
-    () =>
-      activeNote?.type === "folder"
-        ? resolve(activeNote.childIds ?? [])
-        : ([] as Note[]),
+    () => {
+      if (activeNote?.type !== "folder") return [] as Note[];
+      // Direct file children (notes whose `folder` equals this path).
+      const directFiles = resolve(activeNote.childIds ?? []);
+      // Immediate sub-folder children (other folder nodes whose path is
+      // exactly one segment deeper than this one). Without this, a
+      // container folder like `_Indexes` that holds only sub-folders
+      // would render as "0 items / This folder is empty" even though it
+      // contains a whole subtree.
+      const myPath = activeNote.title;
+      const myPrefix = `${myPath}/`;
+      const subFolders = allItems.filter((it) => {
+        if (it.type !== "folder") return false;
+        if (!it.title.startsWith(myPrefix)) return false;
+        // Direct child only: no additional `/` after the prefix.
+        return !it.title.slice(myPrefix.length).includes("/");
+      });
+      return [...subFolders, ...directFiles];
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeNote, byId],
+    [activeNote, byId, allItems],
   );
 
   function openNote(id: string) {
@@ -395,7 +410,7 @@ export function AppShell() {
             onResize={(size: PanelSize) =>
               setLeftCollapsed(size.asPercentage < 1)
             }
-            className="overflow-hidden"
+            className="overflow-hidden bg-sidebar"
           >
             <LeftSidebar
               view={leftView}
@@ -467,7 +482,7 @@ export function AppShell() {
             onResize={(size: PanelSize) =>
               setRightCollapsed(size.asPercentage < 1)
             }
-            className="overflow-hidden"
+            className="overflow-hidden bg-sidebar"
           >
             <RightSidebar
               activeNote={activeNote}
