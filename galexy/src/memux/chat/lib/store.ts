@@ -25,6 +25,13 @@ export type ChatSession = {
   think: boolean;
   temperature: number;
   messages: ChatMessage[];
+  /**
+   * Per-chat override of the global Vault (knowledge-base) toggle.
+   * undefined = inherit clientSettings.kbModeDefault; true / false =
+   * explicit per-chat decision (set when the user clicks the chip × or
+   * the +-menu toggle).
+   */
+  kbMode?: boolean;
 };
 
 type State = {
@@ -50,11 +57,28 @@ type State = {
   deleteMessage: (messageId: string) => void;
   replaceMessages: (msgs: ChatMessage[]) => void;
   clearActiveMessages: () => void;
+  /**
+   * Remove every message from `messageId` (inclusive) to the end of the
+   * active session. Used by Regenerate (drop the assistant message + any
+   * subsequent turns) and Edit-user (drop the user message + everything
+   * after it before putting the text back into the composer).
+   */
+  removeMessagesFrom: (messageId: string) => void;
 };
 
 export function newId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
+
+/**
+ * Default model + context for newly-created chats. Locked to gemma-4-31b-it
+ * (262 144 tokens) because that's our chosen cloud default. If the user is
+ * on Lemonade and the local server doesn't have this model, ChatView's
+ * defaulter heals by swapping to whatever the local /models endpoint
+ * actually serves first.
+ */
+const DEFAULT_MODEL_ID = "gemma-4-31b-it";
+const DEFAULT_CONTEXT_SIZE = 262_144;
 
 function makeChat(defaults: Partial<ChatSession> = {}): ChatSession {
   const now = Date.now();
@@ -63,8 +87,8 @@ function makeChat(defaults: Partial<ChatSession> = {}): ChatSession {
     title: "New chat",
     createdAt: now,
     updatedAt: now,
-    model: defaults.model ?? "",
-    contextSize: defaults.contextSize ?? 8192,
+    model: defaults.model ?? DEFAULT_MODEL_ID,
+    contextSize: defaults.contextSize ?? DEFAULT_CONTEXT_SIZE,
     think: defaults.think ?? false,
     temperature: defaults.temperature ?? 0.7,
     messages: [],
@@ -79,6 +103,16 @@ export const useStore = create<State>()(
       activeId: null,
 
       newChat: (defaults) => {
+        // Prevent two empty chats from coexisting: if an empty chat is
+        // already in the list, just select it instead of creating another.
+        // "Empty" = zero messages. Title may be "New chat" (default) or
+        // anything else — we still reuse it, since the user clearly
+        // hasn't started using it yet.
+        const existingEmpty = get().chats.find((c) => c.messages.length === 0);
+        if (existingEmpty) {
+          set({ activeId: existingEmpty.id });
+          return existingEmpty.id;
+        }
         const c = makeChat(defaults);
         set((s) => ({ chats: [c, ...s.chats], activeId: c.id }));
         return c.id;
@@ -203,6 +237,23 @@ export const useStore = create<State>()(
       },
 
       clearActiveMessages: () => get().replaceMessages([]),
+
+      removeMessagesFrom: (messageId) => {
+        const id = get().activeId;
+        if (!id) return;
+        set((s) => ({
+          chats: s.chats.map((c) => {
+            if (c.id !== id) return c;
+            const idx = c.messages.findIndex((m) => m.id === messageId);
+            if (idx < 0) return c;
+            return {
+              ...c,
+              messages: c.messages.slice(0, idx),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
     }),
     {
       name: "plasma:chats",

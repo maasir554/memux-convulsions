@@ -78,8 +78,8 @@
     "production": {
       "name": "memux-backend",
       "vars": {
-        "BETTER_AUTH_URL": "https://memux-backend.REPLACE-ME.workers.dev",
-        "TRUSTED_ORIGINS": "https://REPLACE-ME.vercel.app"
+        "BETTER_AUTH_URL": "https://memux-backend.maasir554.workers.dev",
+        "TRUSTED_ORIGINS": "https://memux-convulsions.vercel.app"
       },
       "d1_databases": [
         {

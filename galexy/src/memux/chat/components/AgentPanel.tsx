@@ -11,27 +11,26 @@
  *     used sparingly — the chat answer below is where prose lives.
  *   - Auto-scrolls to the newest card unless the user has scrolled up
  *     to inspect history (the agent shouldn't fight your reading).
- *   - Header carries a status pill + close. Shortlist surfaces as a
- *     pinned card at the top of the stream when something's in it.
+ *   - NO internal header — the AGENT label + status pill + close button
+ *     live in the global TopNav above this panel. The panel itself is
+ *     pure content (reasoning teaser + activity stream + shortlist).
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, X, CheckCircle2, CircleAlert, Loader2, ListChecks } from "lucide-react";
+import { Sparkles, ListChecks } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/memux/chat/lib/agent-store";
 import { ActivityCard } from "@/memux/chat/components/activity/ActivityCard";
 import type { Candidate } from "@/lib/chat/types";
 
-export function AgentPanel({ onClose }: { onClose?: () => void }) {
-  const status = useAgentStore((s) => s.status);
+export function AgentPanel() {
   const steps = useAgentStore((s) => s.steps);
   const reasoningStream = useAgentStore((s) => s.reasoningStream);
   const shortlist = useAgentStore((s) => s.shortlist);
 
   return (
     <aside className="flex h-full w-full flex-col border-l border-border bg-gradient-to-b from-background to-card/40">
-      <Header status={status} onClose={onClose} />
       {reasoningStream && (
         <div className="border-b border-border/40 bg-muted/10 px-4 py-2 text-[11px] italic leading-snug text-muted-foreground">
           {reasoningStream.slice(-220)}
@@ -39,69 +38,6 @@ export function AgentPanel({ onClose }: { onClose?: () => void }) {
       )}
       <ActivityStream steps={steps} shortlist={shortlist} />
     </aside>
-  );
-}
-
-/* ------------------------------------------------------------- header */
-
-function Header({
-  status,
-  onClose,
-}: {
-  status: "idle" | "running" | "done" | "error";
-  onClose?: () => void;
-}) {
-  return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/50 px-3.5">
-      <Sparkles className="size-3.5 text-primary" aria-hidden />
-      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        Agent
-      </div>
-      <StatusPill status={status} />
-      {onClose && (
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close agent panel"
-          className="ml-auto rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-        >
-          <X className="size-3.5" />
-        </button>
-      )}
-    </header>
-  );
-}
-
-function StatusPill({ status }: { status: "idle" | "running" | "done" | "error" }) {
-  if (status === "idle") return null;
-  const cfg =
-    status === "running"
-      ? {
-          label: "Working",
-          cls: "border-primary/30 bg-primary/10 text-primary",
-          icon: <Loader2 className="size-3 animate-spin" />,
-        }
-      : status === "done"
-        ? {
-            label: "Done",
-            cls: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
-            icon: <CheckCircle2 className="size-3" />,
-          }
-        : {
-            label: "Error",
-            cls: "border-destructive/30 bg-destructive/10 text-destructive",
-            icon: <CircleAlert className="size-3" />,
-          };
-  return (
-    <span
-      className={cn(
-        "ml-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-        cfg.cls,
-      )}
-    >
-      {cfg.icon}
-      {cfg.label}
-    </span>
   );
 }
 

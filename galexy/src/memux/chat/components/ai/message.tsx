@@ -1,6 +1,20 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { useState } from "react";
+import {
+  Check,
+  Copy,
+  MoreHorizontal,
+  Pencil,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/memux/chat/components/ui/dropdown-menu";
 import { cn } from "@/memux/chat/lib/utils";
 import { Response } from "./response";
 import { Reasoning, splitThinking } from "./reasoning";
@@ -14,12 +28,21 @@ export function Message({
   role,
   parts,
   streaming,
+  isLatestUser,
   onDelete,
+  onRegenerate,
+  onCopy,
+  onEdit,
 }: {
   role: ChatRole;
   parts: DisplayPart[];
   streaming?: boolean;
+  /** Only the most recent user bubble gets the edit-3-dot UI. */
+  isLatestUser?: boolean;
   onDelete?: () => void;
+  onRegenerate?: () => void;
+  onCopy?: () => void;
+  onEdit?: () => void;
 }) {
   const isUser = role === "user";
 
@@ -39,68 +62,204 @@ export function Message({
   return (
     <div
       className={cn(
-        "flex gap-2 group",
-        isUser ? "justify-end" : "justify-start",
+        "group flex flex-col gap-1.5",
+        isUser ? "items-end" : "items-start",
       )}
     >
       <div
-        className={cn(
-          "min-w-0",
-          isUser
-            ? "max-w-[85%] rounded-2xl rounded-br-md bg-secondary text-secondary-foreground px-4 py-2"
-            : "flex-1",
-        )}
+        className={cn("flex w-full gap-2", isUser ? "justify-end" : "justify-start")}
       >
-        {images.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
-            {images.map((img, i) => (
-              <img
-                key={i}
-                src={img.url}
-                alt=""
-                className="max-h-48 rounded-md border"
-              />
-            ))}
-          </div>
+        {/* Left-side 3-dot for the latest user bubble. */}
+        {isUser && isLatestUser && (onEdit || onDelete) && !streaming && (
+          <UserActionMenu onEdit={onEdit} onDelete={onDelete} />
         )}
 
-        {reasoning || (thinking && streaming) ? (
-          <Reasoning
-            content={reasoning}
-            streaming={thinking && streaming}
-            className="mb-2"
-          />
-        ) : null}
+        <div
+          className={cn(
+            "min-w-0",
+            isUser
+              ? "max-w-[85%] rounded-2xl rounded-br-md bg-secondary text-secondary-foreground px-4 py-2"
+              : "flex-1",
+          )}
+        >
+          {images.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {images.map((img, i) => (
+                <img
+                  key={i}
+                  src={img.url}
+                  alt=""
+                  className="max-h-48 rounded-md border"
+                />
+              ))}
+            </div>
+          )}
 
-        {body || streaming ? (
-          isUser ? (
-            <div className="whitespace-pre-wrap leading-[1.5] font-[300]">
-              {body}
-            </div>
-          ) : (
-            <div className="relative">
-              <Response content={body} />
-              {streaming && !thinking && (
-                <span className="inline-block w-2 h-4 bg-foreground/60 align-text-bottom ml-0.5 animate-pulse" />
-              )}
-            </div>
-          )
-        ) : null}
+          {reasoning || (thinking && streaming) ? (
+            <Reasoning
+              content={reasoning}
+              streaming={thinking && streaming}
+              className="mb-2"
+            />
+          ) : null}
+
+          {body || streaming ? (
+            isUser ? (
+              <div className="whitespace-pre-wrap leading-[1.5] font-[300]">
+                {body}
+              </div>
+            ) : (
+              <div className="relative">
+                <Response content={body} />
+                {streaming && !thinking && (
+                  <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-foreground/60 align-text-bottom" />
+                )}
+              </div>
+            )
+          ) : null}
+        </div>
       </div>
 
-      {onDelete && !streaming && (
-        <button
-          onClick={onDelete}
-          className={cn(
-            "self-start mt-1 p-1 rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-accent opacity-0 group-hover:opacity-100 transition-opacity",
-            isUser ? "order-first" : "",
-          )}
-          aria-label="Delete message"
-          title="Delete this message"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+      {/* Assistant: inline icon row below the message. */}
+      {!isUser && !streaming && (onRegenerate || onCopy || onDelete) && (
+        <AssistantActionRow
+          onRegenerate={onRegenerate}
+          onCopy={onCopy}
+          onDelete={onDelete}
+        />
       )}
     </div>
+  );
+}
+
+/* ---------------------------------------------------- assistant row */
+
+function AssistantActionRow({
+  onRegenerate,
+  onCopy,
+  onDelete,
+}: {
+  onRegenerate?: () => void;
+  onCopy?: () => void;
+  onDelete?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  function copy() {
+    onCopy?.();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1300);
+  }
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-0.5 text-muted-foreground/70",
+        "opacity-0 transition-opacity duration-150 group-hover:opacity-100",
+      )}
+    >
+      {onRegenerate && (
+        <ActionIconButton
+          label="Regenerate"
+          onClick={onRegenerate}
+          icon={<RefreshCw className="size-3.5" />}
+        />
+      )}
+      {onCopy && (
+        <ActionIconButton
+          label={copied ? "Copied" : "Copy"}
+          onClick={copy}
+          icon={
+            copied ? (
+              <Check className="size-3.5 text-emerald-400" />
+            ) : (
+              <Copy className="size-3.5" />
+            )
+          }
+        />
+      )}
+      {onDelete && (
+        <ActionIconButton
+          label="Delete"
+          onClick={onDelete}
+          icon={<Trash2 className="size-3.5" />}
+          destructive
+        />
+      )}
+    </div>
+  );
+}
+
+function ActionIconButton({
+  label,
+  onClick,
+  icon,
+  destructive,
+}: {
+  label: string;
+  onClick: () => void;
+  icon: React.ReactNode;
+  destructive?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "rounded-md p-1.5 transition-colors",
+        destructive
+          ? "hover:bg-destructive/15 hover:text-destructive"
+          : "hover:bg-muted/50 hover:text-foreground",
+      )}
+    >
+      {icon}
+    </button>
+  );
+}
+
+/* ------------------------------------------------------ user 3-dot */
+
+function UserActionMenu({
+  onEdit,
+  onDelete,
+}: {
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Message options"
+          className={cn(
+            "mt-1 self-start rounded-md p-1 text-muted-foreground/70 transition-opacity hover:bg-muted/40 hover:text-foreground",
+            open ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+          )}
+        >
+          <MoreHorizontal className="size-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-32">
+        {onEdit && (
+          <DropdownMenuItem onSelect={onEdit}>
+            <Pencil className="size-3.5" />
+            Edit
+          </DropdownMenuItem>
+        )}
+        {onDelete && (
+          <DropdownMenuItem
+            onSelect={onDelete}
+            className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+          >
+            <Trash2 className="size-3.5" />
+            Delete
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

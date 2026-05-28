@@ -20,22 +20,57 @@ type State = {
   directBaseUrl: string;
   directApiKey?: string;
 
+  /** Show the context-window token meter in the chat header. Off by default. */
+  showTokenCounter: boolean;
+  /** Sidebar collapsed → icon-rail. Persists per browser. */
+  sidebarCollapsed: boolean;
+  /** Right-side AgentPanel visible. Default true so KB activity is on screen. */
+  agentPanelOpen: boolean;
+  /**
+   * Whether the Vault (knowledge-base) chip is on by default for newly-created
+   * chats. Existing chats remember their own kbMode separately. Default true.
+   */
+  kbModeDefault: boolean;
+
   setMode: (m: TransportMode) => void;
   setDirectBaseUrl: (u: string) => void;
   setDirectApiKey: (k: string | undefined) => void;
+  setShowTokenCounter: (v: boolean) => void;
+  setSidebarCollapsed: (v: boolean) => void;
+  setAgentPanelOpen: (v: boolean) => void;
+  setKbModeDefault: (v: boolean) => void;
 };
 
 export const useClient = create<State>()(
   persist(
     (set) => ({
-      mode: "direct",
+      // Cloud (backend) is the friendliest default — the user doesn't need
+      // a local model server running to start chatting. They can opt into
+      // Lemonade from settings whenever they want.
+      mode: "backend",
       directBaseUrl: "http://localhost:13305/v1",
       directApiKey: undefined,
+      showTokenCounter: false,
+      sidebarCollapsed: false,
+      agentPanelOpen: true,
+      kbModeDefault: true,
 
       setMode: (mode) => set({ mode }),
       setDirectBaseUrl: (directBaseUrl) => set({ directBaseUrl }),
       setDirectApiKey: (directApiKey) => set({ directApiKey }),
+      setShowTokenCounter: (showTokenCounter) => set({ showTokenCounter }),
+      setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
+      setAgentPanelOpen: (agentPanelOpen) => set({ agentPanelOpen }),
+      setKbModeDefault: (kbModeDefault) => set({ kbModeDefault }),
     }),
-    { name: "plasma:client", version: 1 },
+    {
+      name: "plasma:client",
+      // v3 bumps the default `mode` from "direct" to "backend". Wipe-on-
+      // bump rather than migrate: anyone with a persisted `mode: direct`
+      // from before chose it; we shouldn't silently flip them. Anyone who
+      // never opened settings has effectively no preference — they fall
+      // back to the new defaults.
+      version: 3,
+    },
   ),
 );

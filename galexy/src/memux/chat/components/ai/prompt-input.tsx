@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Image as ImageIcon, Brain, Send, Square, X } from "lucide-react";
+import { Plus, Image as ImageIcon, Brain, Send, Square, X, Database } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -30,6 +30,8 @@ export function PromptInput({
   think,
   onThinkChange,
   thinkSupported,
+  kbMode,
+  onKbToggle,
   placeholder,
   className,
 }: {
@@ -44,6 +46,8 @@ export function PromptInput({
   think: boolean;
   onThinkChange: (v: boolean) => void;
   thinkSupported?: boolean;
+  kbMode?: boolean;
+  onKbToggle?: () => void;
   placeholder?: string;
   className?: string;
 }) {
@@ -119,7 +123,7 @@ export function PromptInput({
         className="block w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm outline-none placeholder:text-muted-foreground"
       />
 
-      <div className="flex items-center gap-1 px-2 pb-2">
+      <div className="flex items-center gap-1.5 px-2 pb-2">
         <Popover>
           <PopoverTrigger asChild>
             <Button
@@ -140,6 +144,22 @@ export function PromptInput({
               <ImageIcon className="h-4 w-4" />
               Attach image
             </button>
+            {onKbToggle && (
+              <label
+                className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+              >
+                <span className="flex items-center gap-2">
+                  <Database className="h-4 w-4" />
+                  Vault
+                </span>
+                <input
+                  type="checkbox"
+                  checked={!!kbMode}
+                  onChange={onKbToggle}
+                  className="h-4 w-4 accent-foreground"
+                />
+              </label>
+            )}
             <label
               className={cn(
                 "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent cursor-pointer",
@@ -159,14 +179,30 @@ export function PromptInput({
             </label>
             {!thinkSupported && (
               <div className="px-2 pb-1 text-[11px] text-muted-foreground">
-                Model isn't tagged as reasoning, but the flag is sent anyway.
+                Model isn&apos;t tagged as reasoning, but the flag is sent anyway.
               </div>
             )}
           </PopoverContent>
         </Popover>
 
+        {/* Vault chip — when on, a dismissable pill sits next to the + button. */}
+        {kbMode && onKbToggle && (
+          <div className="group/chip flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">
+            <Database className="size-3" />
+            <span>Vault</span>
+            <button
+              type="button"
+              onClick={onKbToggle}
+              aria-label="Remove Vault context"
+              className="ml-0.5 rounded-full p-0.5 text-primary/70 transition-colors hover:bg-primary/15 hover:text-primary"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        )}
+
         {think && (
-          <div className="flex items-center gap-1 text-[11px] text-foreground/80 px-1.5 py-0.5 rounded-full bg-accent">
+          <div className="flex items-center gap-1 rounded-full bg-accent px-1.5 py-0.5 text-[11px] text-foreground/80">
             <Brain className="h-3 w-3" />
             think
           </div>
