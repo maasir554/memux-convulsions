@@ -232,8 +232,53 @@ export function SettingsDialog({
             </div>
           )}
         </section>
+
+        <Separator />
+
+        <DisplayPreferences />
       </DialogContent>
     </Dialog>
+  );
+}
+
+function DisplayPreferences() {
+  const showTokenCounter = useClient((s) => s.showTokenCounter);
+  const setShowTokenCounter = useClient((s) => s.setShowTokenCounter);
+  const kbModeDefault = useClient((s) => s.kbModeDefault);
+  const setKbModeDefault = useClient((s) => s.setKbModeDefault);
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-sm font-medium">Display</h3>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span className="flex flex-col">
+          <span>Show token counter in header</span>
+          <span className="text-[11px] text-muted-foreground">
+            Renders the context-window meter next to the chat title.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          checked={showTokenCounter}
+          onChange={(e) => setShowTokenCounter(e.target.checked)}
+          className="h-4 w-4 accent-foreground"
+        />
+      </label>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span className="flex flex-col">
+          <span>Enable Vault by default in new chats</span>
+          <span className="text-[11px] text-muted-foreground">
+            Use the knowledge-base agent (search + read + cite) on every new chat.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          checked={kbModeDefault}
+          onChange={(e) => setKbModeDefault(e.target.checked)}
+          className="h-4 w-4 accent-foreground"
+        />
+      </label>
+    </section>
   );
 }
 
