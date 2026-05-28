@@ -56,9 +56,14 @@ const PdfPreview = dynamic(() => import("./pdf-preview").then((m) => m.PdfPrevie
 export function AttachmentModal({
   attachment,
   onClose,
+  teamId,
+  myUserId,
 }: {
   attachment: ChatAttachment | null;
   onClose: () => void;
+  /** Required for PDF annotations to load + save. */
+  teamId?: string;
+  myUserId?: string | null;
 }) {
   return (
     <Dialog open={Boolean(attachment)} onOpenChange={(open) => !open && onClose()}>
@@ -68,7 +73,14 @@ export function AttachmentModal({
         // header so it sits alongside the filename + Download button).
         className="flex h-[90vh] max-w-[min(96vw,72rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(96vw,72rem)] [&>[data-slot=dialog-close-button]]:hidden"
       >
-        {attachment && <ModalBody attachment={attachment} onClose={onClose} />}
+        {attachment && (
+          <ModalBody
+            attachment={attachment}
+            onClose={onClose}
+            teamId={teamId}
+            myUserId={myUserId ?? null}
+          />
+        )}
         <VisuallyHidden.Root>
           <DialogTitle>{attachment?.filename ?? "Attachment"}</DialogTitle>
         </VisuallyHidden.Root>
@@ -80,9 +92,13 @@ export function AttachmentModal({
 function ModalBody({
   attachment,
   onClose,
+  teamId,
+  myUserId,
 }: {
   attachment: ChatAttachment;
   onClose: () => void;
+  teamId?: string;
+  myUserId: string | null;
 }) {
   const url = attachmentUrl(attachment.key);
   const kind = pickKind(attachment);
@@ -118,7 +134,14 @@ function ModalBody({
       {/* Body */}
       <div className="min-h-0 flex-1 overflow-hidden bg-muted/20">
         {kind === "image" && <ImagePreview url={url} alt={attachment.filename} />}
-        {kind === "pdf" && <PdfPreview url={url} />}
+        {kind === "pdf" && (
+          <PdfPreview
+            url={url}
+            teamId={teamId}
+            attachmentKey={attachment.key}
+            myUserId={myUserId}
+          />
+        )}
         {kind === "csv" && <CsvPreview url={url} />}
         {kind === "text" && <TextPreview url={url} />}
         {kind === "other" && <UnsupportedPreview attachment={attachment} url={url} />}

@@ -60,3 +60,22 @@ export interface TeamInvite {
   createdAt: string;
   revokedAt: string | null;
 }
+
+/**
+ * A rectangle + comment placed on a shared PDF attachment in a team chat.
+ * Coordinates are normalised 0..1 against the page bounds so the same
+ * annotation lands on the same logical spot at any render scale.
+ */
+export interface PdfAnnotation {
+  id: string;
+  page: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  body: string;
+  userId: string;
+  userName: string;
+  userImage: string | null;
+  createdAt: string;
+}

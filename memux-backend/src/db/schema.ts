@@ -14,7 +14,7 @@
  */
 
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, primaryKey, index, real } from "drizzle-orm/sqlite-core";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Better-Auth tables
@@ -104,3 +104,30 @@ export const teamInvite = sqliteTable("team_invite", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
   revokedAt: integer("revoked_at", { mode: "timestamp" }),
 });
+
+/**
+ * Shared rectangle-and-comment annotation on a team-shared PDF attachment.
+ * Coordinates are normalised 0..1 against the page bounds, so a saved
+ * annotation lands on the same logical spot regardless of render scale.
+ *
+ * attachment_key is the R2 object key (teams/<teamId>/<uuid>/<filename>);
+ * carrying team_id alongside lets us cascade on team deletion and index
+ * without parsing the key.
+ */
+export const chatPdfAnnotation = sqliteTable(
+  "chat_pdf_annotation",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id").notNull().references(() => team.id, { onDelete: "cascade" }),
+    attachmentKey: text("attachment_key").notNull(),
+    page: integer("page").notNull(),
+    x: real("x").notNull(),
+    y: real("y").notNull(),
+    w: real("w").notNull(),
+    h: real("h").notNull(),
+    body: text("body").notNull(),
+    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => [index("chat_pdf_annotation_lookup").on(t.teamId, t.attachmentKey, t.page)],
+);

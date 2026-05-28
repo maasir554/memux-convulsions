@@ -14,6 +14,7 @@
 import type {
   ChatAttachment,
   ChatMessage,
+  PdfAnnotation,
   TeamDetail,
   TeamInvite,
   TeamSummary,
@@ -152,6 +153,34 @@ export const teamsApi = {
       "GET",
       `/api/teams/${teamId}/ws-token`,
     ),
+
+  // PDF annotations — list / create / delete.
+  listAnnotations: (teamId: string, key: string) =>
+    request<{ annotations: PdfAnnotation[] }>(
+      "GET",
+      `/api/teams/${teamId}/annotations?key=${encodeURIComponent(key)}`,
+    ),
+
+  createAnnotation: (
+    teamId: string,
+    input: {
+      key: string;
+      page: number;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      body: string;
+    },
+  ) =>
+    request<{ annotation: PdfAnnotation }>(
+      "POST",
+      `/api/teams/${teamId}/annotations`,
+      input,
+    ),
+
+  deleteAnnotation: (teamId: string, annotationId: string) =>
+    request<void>("DELETE", `/api/teams/${teamId}/annotations/${annotationId}`),
 
   // Upload a single file. The Worker enforces size + membership.
   // Multipart isn't a JSON body so we bypass the shared request() helper.

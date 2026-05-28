@@ -296,6 +296,8 @@ function RoomShell({
       <AttachmentModal
         attachment={modalAttachment}
         onClose={() => setModalAttachment(null)}
+        teamId={team.id}
+        myUserId={room.myId}
       />
 
       {/* Drag-drop overlay. Pointer-events:none so dragleave still resolves

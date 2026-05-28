@@ -23,6 +23,7 @@ import { getDb } from "../lib/db";
 import { genId, genInviteCode } from "../lib/ids";
 import { signWsToken, tokenExpiry } from "../lib/ws-token";
 import { requireUser, type AuthedVariables } from "../middleware/auth";
+import annotationsRouter from "./annotations";
 import { teamAttachmentsRouter } from "./attachments";
 import type { WorkerEnv } from "../env";
 
@@ -457,6 +458,12 @@ teams.post("/:id/messages", async (c) => {
 // ─────────────────────────────────────────────────────────────────────────
 
 teams.route("/:id/attachments", teamAttachmentsRouter);
+
+// PDF annotations sub-router.
+// GET    /api/teams/:id/annotations?key=<r2-key>
+// POST   /api/teams/:id/annotations
+// DELETE /api/teams/:id/annotations/:annotationId
+teams.route("/:id/annotations", annotationsRouter);
 
 // silence the unused import warning until member-management routes land
 void or;
