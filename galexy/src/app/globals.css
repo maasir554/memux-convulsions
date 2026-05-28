@@ -384,3 +384,64 @@
   width: 3ch;
   animation: ws-indexing-dots 1.6s steps(4, jump-none) infinite;
 }
+
+/* ============================================================================
+ * Agent activity stream — soft card entrance + cursor blink + ambient pulse.
+ * Used by the AgentPanel's right-side activity stream and the main-panel
+ * "thinking" banner.
+ * ========================================================================== */
+
+/* Card enters from a sub-pixel lift with a fade. 420ms feels considered;
+   ease-out lands the card softly. We also dim a touch of saturation on the
+   way in so it doesn't strobe the eye. */
+@keyframes ws-card-enter {
+  0%   { opacity: 0; transform: translateY(8px) scale(0.985); filter: saturate(0.7); }
+  60%  { opacity: 1; filter: saturate(1); }
+  100% { opacity: 1; transform: translateY(0) scale(1);     filter: saturate(1); }
+}
+.ws-card-enter {
+  animation: ws-card-enter 420ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+
+/* Synthetic typing cursor for text that the LLM is "speaking". Pure CSS,
+   no JS — used after an animated verb to imply continuation. */
+@keyframes ws-cursor-blink {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.ws-cursor-blink {
+  display: inline-block;
+  width: 0.5ch;
+  margin-left: 0.15ch;
+  animation: ws-cursor-blink 1.1s steps(1, end) infinite;
+}
+
+/* Slow ambient pulse for the active-step accent dot. Different feel from
+   ws-ripple-pulse (which is the queue's "alive" green dot) — this one is
+   smaller, calmer, primary-tinted. */
+@keyframes ws-soft-pulse {
+  0%, 100% { box-shadow: 0 0 0 0   color-mix(in oklch, var(--primary) 35%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in oklch, var(--primary) 0%,  transparent); }
+}
+.ws-soft-pulse {
+  background: var(--primary);
+  animation: ws-soft-pulse 1.8s ease-out infinite;
+}
+
+/* Typed-reveal animation for an answer string. The container is sized to
+   its content via inline `--ws-typing-chars`, and the width animates from
+   0 to that count of `ch` over a configurable duration. Used to feel like
+   the answer is being "spoken". */
+@keyframes ws-typing-reveal {
+  from { width: 0; }
+  to   { width: var(--ws-typing-chars, 100%); }
+}
+.ws-typing-reveal {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
+  width: var(--ws-typing-chars, 100%);
+  animation: ws-typing-reveal var(--ws-typing-duration, 1.4s) steps(40, end) both;
+}

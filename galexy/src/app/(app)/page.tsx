@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 const TILES = [
   {
-    href: "/index",
+    href: "/indexer",
     label: "Index",
     sub: "Drop files, add context, build a searchable index.",
     Icon: FilePlus,
