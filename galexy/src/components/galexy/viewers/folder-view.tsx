@@ -28,7 +28,8 @@ export function FolderView({ folder, entries, onOpen }: FolderViewProps) {
             >
               <ItemIcon
                 type={child.type}
-                className="size-4 shrink-0 text-muted-foreground"
+                language={child.language}
+                className="size-4 shrink-0"
               />
               <span className="min-w-0 flex-1 truncate font-medium">
                 {child.title}

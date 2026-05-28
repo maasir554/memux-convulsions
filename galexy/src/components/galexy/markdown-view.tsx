@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useContext } from "react";
-import { Check } from "lucide-react";
+import { createContext, useContext, useState } from "react";
+import { Check, ImageOff } from "lucide-react";
 import ReactMarkdown, {
   type Components,
   defaultUrlTransform,
@@ -82,9 +82,9 @@ export function MarkdownView({
             type="button"
             onClick={() => onOpenWikiLink(title)}
             className={cn(
-              "cursor-pointer font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary",
+              "cursor-pointer font-medium text-blue-700 underline decoration-blue-500/40 underline-offset-2 hover:decoration-blue-500 dark:text-blue-300 dark:decoration-blue-400/40 dark:hover:decoration-blue-400",
               !exists &&
-                "text-muted-foreground decoration-dashed decoration-muted-foreground/50 hover:text-foreground",
+                "text-muted-foreground decoration-dashed decoration-muted-foreground/50 hover:text-foreground dark:text-muted-foreground dark:decoration-muted-foreground/50",
             )}
           >
             {children}
@@ -105,7 +105,13 @@ export function MarkdownView({
       }
 
       return (
-        <a href={href} target="_blank" rel="noreferrer" {...props}>
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-blue-700 underline decoration-blue-500/40 underline-offset-2 hover:decoration-blue-500 dark:text-blue-300 dark:decoration-blue-400/40 dark:hover:decoration-blue-400"
+          {...props}
+        >
           {children}
         </a>
       );
@@ -118,15 +124,15 @@ export function MarkdownView({
         if (note) {
           return <WikilinkImage note={note} alt={alt ?? ""} />;
         }
-        // Unresolved — surface the alt text so the reader at least knows what's missing.
-        return (
-          <span className="my-2 inline-block rounded-md border border-dashed border-muted-foreground/40 px-3 py-2 text-xs italic text-muted-foreground">
-            missing image{alt ? `: ${alt}` : ""}
-          </span>
-        );
+        return <BrokenImage alt={alt ?? ""} reason={`Couldn't resolve ${title}`} />;
       }
-      // eslint-disable-next-line @next/next/no-img-element
-      return <img src={src} alt={alt ?? ""} {...props} />;
+      return (
+        <ExternalImage
+          src={typeof src === "string" ? src : undefined}
+          alt={alt ?? ""}
+          {...props}
+        />
+      );
     },
   };
 
@@ -188,10 +194,12 @@ function TaskCheckbox({
 /**
  * Renders an image whose source is a vault Note — either an OPFS-backed blob
  * (Note.blobKey) or a packaged asset (Note.src). Falls back to the alt text
- * while the OPFS read is in flight or if neither source is available.
+ * while the OPFS read is in flight, and renders a themed BrokenImage block
+ * if neither source is available or the bytes don't decode.
  */
 function WikilinkImage({ note, alt }: { note: Note; alt: string }) {
   const blobUrl = useBlobUrl(note.blobKey);
+  const [errored, setErrored] = useState(false);
   const url = blobUrl ?? note.src ?? null;
   if (!url) {
     return (
@@ -200,12 +208,71 @@ function WikilinkImage({ note, alt }: { note: Note; alt: string }) {
       </span>
     );
   }
+  if (errored) {
+    return <BrokenImage alt={alt || note.title} reason="Bytes wouldn't decode" />;
+  }
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={url}
       alt={alt || note.title}
+      onError={() => setErrored(true)}
       className="my-3 rounded-md border bg-muted/20 max-w-full"
     />
+  );
+}
+
+/**
+ * External (non-wikilink) image with the same themed broken-image fallback
+ * as WikilinkImage. We swap to BrokenImage on error so the reader never
+ * sees the browser's native broken-image glyph in rendered markdown.
+ */
+function ExternalImage({
+  src,
+  alt,
+  ...rest
+}: { src?: string; alt: string } & React.ImgHTMLAttributes<HTMLImageElement>) {
+  const [errored, setErrored] = useState(false);
+  if (!src) return <BrokenImage alt={alt} reason="No source" />;
+  if (errored) return <BrokenImage alt={alt} reason="Couldn't load" />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt={alt} onError={() => setErrored(true)} {...rest} />
+  );
+}
+
+/**
+ * Themed placeholder for an image that couldn't be displayed. Matches the
+ * rest of the app — rounded card, dashed muted border, gradient wash from
+ * primary, a single soft icon, the alt text as the caption, and a tiny
+ * reason line.
+ *
+ * Never renders a `<img>` so the browser's native broken-image glyph never
+ * surfaces in rendered markdown.
+ */
+function BrokenImage({ alt, reason }: { alt: string; reason?: string }) {
+  return (
+    <span
+      role="img"
+      aria-label={alt || "broken image"}
+      className={cn(
+        "my-3 flex w-full max-w-md flex-col items-center justify-center gap-1.5",
+        "rounded-lg border border-dashed border-muted-foreground/30",
+        "bg-gradient-to-br from-primary/[0.04] via-muted/30 to-muted/10",
+        "px-4 py-5",
+      )}
+    >
+      <ImageOff className="size-5 text-muted-foreground/60" strokeWidth={1.5} />
+      {alt && (
+        <span className="line-clamp-2 text-center text-xs font-medium text-foreground/70">
+          {alt}
+        </span>
+      )}
+      {reason && (
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50">
+          {reason}
+        </span>
+      )}
+    </span>
   );
 }

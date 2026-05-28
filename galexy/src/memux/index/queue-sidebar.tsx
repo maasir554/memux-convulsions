@@ -46,6 +46,7 @@ export function QueueSidebar() {
   const setActive = useIndexerStore((s) => s.setActive);
   const newDraft = useIndexerStore((s) => s.newDraft);
   const deleteGroupById = useIndexerStore((s) => s.deleteGroupById);
+  const cancelAndDelete = useIndexerStore((s) => s.cancelAndDelete);
 
   // Section the list: drafts at top, then queued (in order), then running, then completed/failed.
   const sectioned = useMemo(() => {
@@ -95,7 +96,12 @@ export function QueueSidebar() {
                 group={g}
                 active={activeId === g.id}
                 onSelect={() => setActive(g.id)}
-                onDelete={null}
+                onDelete={() => {
+                  const ok = window.confirm(
+                    `Cancel "${displayTitle(g)}" and remove it from the queue? Any partial output stays in your vault under _Indexes/.`,
+                  );
+                  if (ok) void cancelAndDelete(g.id);
+                }}
               />
             ))}
           </SidebarSection>
@@ -175,7 +181,13 @@ function GroupRow({
   onSelect: () => void;
   onDelete: (() => void) | null;
 }) {
-  const title = displayTitle(group);
+  const isRunning =
+    group.status !== "draft" &&
+    group.status !== "queued" &&
+    group.status !== "done" &&
+    group.status !== "failed" &&
+    group.status !== "cancelled";
+
   return (
     <div
       role="button"
@@ -195,7 +207,17 @@ function GroupRow({
       )}
     >
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm leading-tight">{title}</div>
+        <div className="flex min-w-0 items-center gap-1.5">
+          {isRunning && (
+            <span
+              className="ws-ripple-dot size-1.5 shrink-0 rounded-full"
+              aria-label="Live"
+            />
+          )}
+          <span className="truncate text-sm leading-tight">
+            <RowTitle group={group} isRunning={isRunning} />
+          </span>
+        </div>
         <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
           <span
             className={cn(
@@ -232,4 +254,22 @@ function GroupRow({
 
 function displayTitle(g: Group): string {
   return g.groupName.trim() || "(AI will name)";
+}
+
+/**
+ * Title for a queue row. When the group is mid-run AND has no user-typed
+ * name yet, show "Indexing" with animated cycling dots — otherwise just
+ * the static title. The dots use a CSS step animation on width, so the
+ * span literally types out "." → ".." → "..." → "" → repeat.
+ */
+function RowTitle({ group, isRunning }: { group: Group; isRunning: boolean }) {
+  const hasName = group.groupName.trim().length > 0;
+  if (isRunning && !hasName) {
+    return (
+      <>
+        Indexing<span className="ws-indexing-dots">...</span>
+      </>
+    );
+  }
+  return <>{displayTitle(group)}</>;
 }

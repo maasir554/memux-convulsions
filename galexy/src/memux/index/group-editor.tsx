@@ -16,7 +16,6 @@ import {
   useActiveGroup,
   useIndexerStore,
 } from "@/lib/indexer/queue-store";
-import { useLiveProgress } from "@/lib/indexer/live-progress";
 import type { Group } from "@/lib/indexer/queue-db";
 import {
   FilesSection,
@@ -225,6 +224,7 @@ function ReadOnlyGroupView({ group }: { group: Group }) {
     group.status !== "done" &&
     group.status !== "failed" &&
     group.status !== "cancelled";
+  const hasName = group.groupName.trim().length > 0;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -234,13 +234,19 @@ function ReadOnlyGroupView({ group }: { group: Group }) {
             {group.status}
           </div>
           <div className="mt-1 text-2xl font-semibold tracking-tight">
-            {group.groupName || "(AI will name)"}
+            {hasName ? (
+              group.groupName
+            ) : isRunning ? (
+              <>
+                Indexing<span className="ws-indexing-dots">...</span>
+              </>
+            ) : (
+              "(AI will name)"
+            )}
           </div>
         </div>
 
         {group.prompt && <SourceCard prompt={group.prompt} />}
-
-        {isRunning && <LiveStats />}
 
         <FilesSection files={group.files} />
 
@@ -264,38 +270,6 @@ function ReadOnlyGroupView({ group }: { group: Group }) {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-/* ----------------------------- live progress widgets in the centre pane */
-
-function LiveStats() {
-  const sectionsClosed = useLiveProgress((s) => s.sectionsClosed);
-  const conceptsFound = useLiveProgress((s) => s.conceptsFound);
-  const treeUsed = useLiveProgress((s) => s.treeUsed);
-  return (
-    <div className="flex items-center gap-4 rounded-lg border bg-card/60 px-4 py-3 text-xs">
-      <Stat label="sections" value={sectionsClosed} />
-      <div className="h-3 w-px bg-border" />
-      <Stat label="concepts" value={conceptsFound} />
-      {treeUsed && (
-        <>
-          <div className="h-3 w-px bg-border" />
-          <span className="text-muted-foreground">a11y tree in context</span>
-        </>
-      )}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex items-baseline gap-1.5">
-      <span className="text-lg font-semibold tabular-nums">{value}</span>
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
     </div>
   );
 }

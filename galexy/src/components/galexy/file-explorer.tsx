@@ -23,6 +23,15 @@ import {
 } from "@/components/galexy/folder-actions";
 import type { UploadCategory } from "@/components/galexy/use-vault";
 
+/**
+ * Drag-and-drop wire format. Custom MIME so we don't accidentally accept
+ * payloads from the OS file picker (those use "Files") or from other apps.
+ */
+const DRAG_MIME = "application/x-galexy-move";
+type DragPayload =
+  | { kind: "item"; id: string }
+  | { kind: "folder"; path: string };
+
 /** The four things a user can spawn inline. */
 export type CreateKind = "markdown" | "code" | "csv" | "folder";
 
@@ -71,6 +80,12 @@ type FileExplorerProps = {
   onUpload: (category: UploadCategory, folder: string, files: File[]) => void;
   onDeleteItem: (id: string) => void;
   onDeleteFolder: (name: string) => void;
+  onRenameItem: (id: string) => void;
+  onRenameFolder: (name: string) => void;
+  /** Move an item into a different folder path. "" = vault root. */
+  onMoveItem: (id: string, folder: string) => void;
+  /** Move a folder under a different parent. "" = vault root. */
+  onMoveFolder: (oldPath: string, newParent: string) => void;
   /** Multi-select mode — when true, rows render a checkbox. */
   multiSelect: boolean;
   selected: Set<SelectionKey>;
@@ -89,6 +104,10 @@ export function FileExplorer({
   onUpload,
   onDeleteItem,
   onDeleteFolder,
+  onRenameItem,
+  onRenameFolder,
+  onMoveItem,
+  onMoveFolder,
   multiSelect,
   selected,
   onToggleSelect,
@@ -96,8 +115,55 @@ export function FileExplorer({
   const { rootNotes, topLevelFolders } = buildNestedTree(notes, folderNames);
   const creatingAtRoot = creating?.folder === "";
 
+  /**
+   * Common drop handler. `targetFolder` is "" for vault-root drops or the
+   * folder's full path for a folder-row drop. Rejects no-op moves and
+   * cycle-causing folder moves silently.
+   */
+  function dropPayloadOnFolder(
+    e: React.DragEvent<HTMLElement>,
+    targetFolder: string,
+  ): boolean {
+    const raw = e.dataTransfer.getData(DRAG_MIME);
+    if (!raw) return false;
+    e.preventDefault();
+    let payload: DragPayload;
+    try {
+      payload = JSON.parse(raw) as DragPayload;
+    } catch {
+      return false;
+    }
+    if (payload.kind === "item") {
+      const note = notes.find((n) => n.id === payload.id);
+      if (!note || note.folder === targetFolder) return false;
+      onMoveItem(payload.id, targetFolder);
+      return true;
+    }
+    const oldPath = payload.path;
+    if (!oldPath) return false;
+    // Cycle / no-op guards.
+    if (targetFolder === oldPath) return false;
+    if (targetFolder.startsWith(`${oldPath}/`)) return false;
+    const lastSlash = oldPath.lastIndexOf("/");
+    const currentParent = lastSlash >= 0 ? oldPath.slice(0, lastSlash) : "";
+    if (currentParent === targetFolder) return false;
+    onMoveFolder(oldPath, targetFolder);
+    return true;
+  }
+
   return (
-    <div className="flex flex-col gap-0.5 p-2 text-sm">
+    <div
+      className="flex flex-col gap-0.5 p-2 text-sm"
+      // Allow drop on empty tree space → vault root. The handler does its
+      // own MIME validation, and inner rows preventDefault before reaching
+      // here, so this only fires for drops on the gaps.
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes(DRAG_MIME)) {
+          e.preventDefault();
+        }
+      }}
+      onDrop={(e) => dropPayloadOnFolder(e, "")}
+    >
       {creatingAtRoot && creating && (
         <NameInputRow
           kind={creating.kind}
@@ -112,6 +178,8 @@ export function FileExplorer({
           active={note.id === activeId}
           onOpen={onOpen}
           onDelete={onDeleteItem}
+          onRename={onRenameItem}
+          dropPayloadOnFolder={dropPayloadOnFolder}
           multiSelect={multiSelect}
           selected={selected}
           onToggleSelect={onToggleSelect}
@@ -130,6 +198,9 @@ export function FileExplorer({
           onUpload={onUpload}
           onDeleteItem={onDeleteItem}
           onDeleteFolder={onDeleteFolder}
+          onRenameItem={onRenameItem}
+          onRenameFolder={onRenameFolder}
+          dropPayloadOnFolder={dropPayloadOnFolder}
           multiSelect={multiSelect}
           selected={selected}
           onToggleSelect={onToggleSelect}
@@ -199,6 +270,9 @@ function FolderGroup({
   onUpload,
   onDeleteItem,
   onDeleteFolder,
+  onRenameItem,
+  onRenameFolder,
+  dropPayloadOnFolder,
   multiSelect,
   selected,
   onToggleSelect,
@@ -213,11 +287,21 @@ function FolderGroup({
   onUpload: (category: UploadCategory, folder: string, files: File[]) => void;
   onDeleteItem: (id: string) => void;
   onDeleteFolder: (name: string) => void;
+  onRenameItem: (id: string) => void;
+  onRenameFolder: (name: string) => void;
+  /** Reused drop logic threaded down from FileExplorer. */
+  dropPayloadOnFolder: (
+    e: React.DragEvent<HTMLElement>,
+    targetFolder: string,
+  ) => boolean;
   multiSelect: boolean;
   selected: Set<SelectionKey>;
   onToggleSelect: (key: SelectionKey) => void;
 }) {
-  const [open, setOpen] = useState(true);
+  // Folders start collapsed; the user opens what they want to see.
+  const [open, setOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const creatingHere = creating?.folder === node.path ? creating : null;
   const isEmpty = node.notes.length === 0 && node.children.length === 0;
 
@@ -228,13 +312,42 @@ function FolderGroup({
         onStartCreate={onStartCreate}
         onUpload={onUpload}
         onDeleteFolder={onDeleteFolder}
+        onRenameFolder={onRenameFolder}
       >
         <div
+          draggable={!multiSelect}
+          onDragStart={(e) => {
+            const payload: DragPayload = { kind: "folder", path: node.path };
+            e.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
+            e.dataTransfer.effectAllowed = "move";
+            setDragging(true);
+            // Prevent the parent row's drag from also firing.
+            e.stopPropagation();
+          }}
+          onDragEnd={() => setDragging(false)}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            setDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            // Ignore dragleave that's actually entering a child element.
+            if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+            setDragOver(false);
+          }}
+          onDrop={(e) => {
+            setDragOver(false);
+            e.stopPropagation();
+            dropPayloadOnFolder(e, node.path);
+          }}
           className={cn(
             "group/folder flex items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
             multiSelect &&
               selected.has(folderKey(node.path)) &&
               "bg-sidebar-accent text-foreground",
+            dragging && "opacity-40",
+            dragOver && "ring-2 ring-primary/60",
           )}
         >
           {multiSelect && (
@@ -272,6 +385,7 @@ function FolderGroup({
               onStartCreate={onStartCreate}
               onUpload={onUpload}
               onDeleteFolder={onDeleteFolder}
+              onRenameFolder={onRenameFolder}
             />
           </div>
         </div>
@@ -298,6 +412,9 @@ function FolderGroup({
               onUpload={onUpload}
               onDeleteItem={onDeleteItem}
               onDeleteFolder={onDeleteFolder}
+              onRenameItem={onRenameItem}
+              onRenameFolder={onRenameFolder}
+              dropPayloadOnFolder={dropPayloadOnFolder}
               multiSelect={multiSelect}
               selected={selected}
               onToggleSelect={onToggleSelect}
@@ -310,6 +427,8 @@ function FolderGroup({
               active={note.id === activeId}
               onOpen={onOpen}
               onDelete={onDeleteItem}
+              onRename={onRenameItem}
+              dropPayloadOnFolder={dropPayloadOnFolder}
               multiSelect={multiSelect}
               selected={selected}
               onToggleSelect={onToggleSelect}
@@ -331,6 +450,8 @@ function NoteItem({
   active,
   onOpen,
   onDelete,
+  onRename,
+  dropPayloadOnFolder,
   multiSelect,
   selected,
   onToggleSelect,
@@ -339,19 +460,54 @@ function NoteItem({
   active: boolean;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string) => void;
+  /** Reused drop logic — passed in so the item row can resolve "drop on
+   *  this file" to "drop into this file's parent folder". */
+  dropPayloadOnFolder: (
+    e: React.DragEvent<HTMLElement>,
+    targetFolder: string,
+  ) => boolean;
   multiSelect: boolean;
   selected: Set<SelectionKey>;
   onToggleSelect: (key: SelectionKey) => void;
 }) {
   const sk = itemKey(note.id);
   const isSelected = multiSelect && selected.has(sk);
+  const [dragging, setDragging] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   return (
-    <ItemContextMenu itemId={note.id} onDelete={onDelete}>
+    <ItemContextMenu itemId={note.id} onRename={onRename} onDelete={onDelete}>
       <div
+        draggable={!multiSelect}
+        onDragStart={(e) => {
+          const payload: DragPayload = { kind: "item", id: note.id };
+          e.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
+          e.dataTransfer.effectAllowed = "move";
+          setDragging(true);
+        }}
+        onDragEnd={() => setDragging(false)}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setDragOver(true);
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+          setDragOver(false);
+        }}
+        onDrop={(e) => {
+          setDragOver(false);
+          e.stopPropagation();
+          // Resolve "drop on file" → "drop in this file's parent folder".
+          dropPayloadOnFolder(e, note.folder);
+        }}
         className={cn(
           "group/item flex items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
           active && "bg-sidebar-accent text-foreground",
           isSelected && "bg-primary/10 text-foreground",
+          dragging && "opacity-40",
+          dragOver && "ring-2 ring-primary/40",
         )}
       >
         {multiSelect && (
@@ -368,13 +524,18 @@ function NoteItem({
           onClick={() => onOpen(note.id)}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md px-2 py-1 text-left"
         >
-          <ItemIcon type={note.type} className="size-4 shrink-0" />
+          <ItemIcon
+            type={note.type}
+            language={note.language}
+            className="size-4 shrink-0"
+          />
           <span className="min-w-0 flex-1 truncate">{note.title}</span>
         </button>
         <div className="flex items-center gap-0.5 pr-1.5">
           <ItemActionsPopover
             itemId={note.id}
             itemTitle={note.title}
+            onRename={onRename}
             onDelete={onDelete}
           />
         </div>

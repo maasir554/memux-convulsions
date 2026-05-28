@@ -17,25 +17,21 @@ import { useEffect, useRef } from "react";
 import { popNextForRun } from "@/lib/indexer/queue-db";
 import { runOne } from "@/lib/indexer/orchestrator";
 import { useIndexerStore } from "@/lib/indexer/queue-store";
+import { register, unregister } from "@/lib/indexer/runs-registry";
 
 export function useIndexerSupervisor(): void {
   const groups = useIndexerStore((s) => s.groups);
   const inflightRef = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
 
-  // Unmount-only abort. Kept in its own effect with empty deps — useEffect
-  // cleanups also fire on every dependency change, so attaching the abort
-  // to the [groups]-effect below would kill the active run the moment the
-  // orchestrator's first status update mutated `groups`.
-  useEffect(() => {
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, []);
-
-  // Pickup loop: when groups change, see if there's work to start. The
-  // cleanup is intentionally empty — runs must survive the constant
-  // groups-array churn the orchestrator generates as it narrates progress.
+  // No abort on unmount. An in-flight run should complete silently if the
+  // user navigates away — its state lives in PGlite, and the live-progress
+  // store repopulates from emit calls the moment the indexer page re-mounts.
+  //
+  // The previous abort-on-unmount caused intermittent "signal is aborted
+  // without reason" failures: any brief remount (HMR, parent reconciliation,
+  // React 19 reactivity quirks in dev) fired the cleanup mid-run, which
+  // aborted the active Visioner fetch. Better to let the run finish — the
+  // worst case is some wasted LLM tokens if the user never returns.
   useEffect(() => {
     if (!groups) return;
     if (inflightRef.current) return;
@@ -51,18 +47,26 @@ export function useIndexerSupervisor(): void {
     if (!hasQueued || hasRunning) return;
 
     inflightRef.current = true;
+    // Signal is threaded through for future use (a user-initiated cancel
+    // button, say) but is never aborted from this hook.
     const ac = new AbortController();
-    abortRef.current = ac;
 
     (async () => {
+      let registeredRunId: string | null = null;
       try {
         const next = await popNextForRun();
         if (!next) return;
         await useIndexerStore.getState().refreshOne(next.id);
+        // Make the AbortController externally addressable so the queue
+        // sidebar's cancel button (and any future programmatic stop) can
+        // hit it.
+        register(next.id, ac);
+        registeredRunId = next.id;
         await runOne(next, { signal: ac.signal });
       } catch (err) {
         console.error("[supervisor] run failed:", err);
       } finally {
+        if (registeredRunId) unregister(registeredRunId);
         inflightRef.current = false;
         // Re-load so the supervisor effect re-runs and can pick the next item.
         await useIndexerStore.getState().load();

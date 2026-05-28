@@ -14,14 +14,29 @@
 
 import {
   embedBatch,
+  imageReaderCall,
   namerCall,
   summariserCall,
   visionerCall,
 } from "@/lib/indexer/agent-client";
+import { readBlobUrl } from "@/lib/blob-store";
 import type { VisionerOutput } from "@/lib/indexer/agents";
-import { extractorFor, fileFromRef } from "@/lib/indexer/extractors";
+import {
+  extractorFor,
+  fileFromRef,
+  preflightThumbnails,
+} from "@/lib/indexer/extractors";
+import {
+  buildTreeOutline,
+  enrichLinks,
+  findImageContext,
+  formatImageContext,
+  formatOutline,
+  summariseTree,
+} from "@/lib/indexer/tree-utils";
 import {
   inlineDiagramRefs,
+  materialiseDomImages,
   planIndexFolders,
   renameIndexGroup,
   writeCropImage,
@@ -29,12 +44,16 @@ import {
   writeSectionNote,
 } from "@/lib/indexer/materialise";
 import { getVaultDb } from "@/lib/db/vault-db";
-import { indexChunks, sections } from "@/lib/db/schema";
+import { indexChunks, sections, type IndexerDomImage } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 
 import type { Group } from "@/lib/indexer/queue-db";
+
+/** DOM image enriched with the Image Reader agent's output. */
+type IndexerDomImageWithRead = IndexerDomImage;
 import { useIndexerStore } from "@/lib/indexer/queue-store";
 import { useLiveProgress } from "@/lib/indexer/live-progress";
+import { USER_CANCELLED } from "@/lib/indexer/runs-registry";
 
 type RunHooks = {
   signal?: AbortSignal;
@@ -78,16 +97,53 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
   const userProvidedName = group.groupName.trim();
   let groupName = userProvidedName || `Group ${new Date().toISOString().slice(0, 16)}`;
 
-  // Tree-as-context is the worksmith capture marker — the bridge appends a
-  // "Pruned accessibility tree" block to the prompt.
-  const treeUsed = /Pruned accessibility tree/i.test(group.prompt);
+  // Tree-as-context is the worksmith capture marker — the bridge stashes the
+  // pruned tree on the run row, and the orchestrator walks it for link
+  // enrichment + node-count signal.
+  const treeUsed = !!group.prunedTree;
+  const treeSummary = treeUsed
+    ? summariseTree(group.prunedTree)
+    : { nodeCount: 0, linkCount: 0, textToHref: new Map<string, string>() };
+  // Heading-only outline — anchors topic decisions across pages the Visioner
+  // can't see in one shot. Computed once, sent to every page's call.
+  const outlineEntries = treeUsed ? buildTreeOutline(group.prunedTree) : [];
+  const documentOutline =
+    outlineEntries.length > 0 ? formatOutline(outlineEntries) : undefined;
+
   live.getState().startRun(runId, groupName || "(naming pending)", group.files.length, treeUsed);
+  if (treeUsed) {
+    live.getState().setTreeNodes(treeSummary.nodeCount);
+    live.getState().pushAction(
+      `Read tree · ${treeSummary.nodeCount} nodes · ${treeSummary.linkCount} links`,
+    );
+    if (outlineEntries.length > 0) {
+      live.getState().setOutlineHeadings(outlineEntries.length);
+      live.getState().pushAction(
+        `Read outline · ${outlineEntries.length} heading${outlineEntries.length === 1 ? "" : "s"}`,
+      );
+    }
+  }
 
   try {
     await setStatus(runId, "preparing");
     await scratch(runId, `## Run started\n- Files: ${group.files.length}\n- Will auto-name: ${userProvidedName ? "no" : "yes"}`);
     const folder = planIndexFolders(groupName);
     await store.getState().applyStatus(runId, "preparing", { folderName: folder });
+
+    // Seed the live-view thumbnail strip with every page we know about
+    // before walking starts. For images this is essentially instant; for
+    // PDFs we render every page at scale 0.35 just to get a small preview.
+    // The orchestrator then promotes each thumb to active → done as it
+    // processes the page, so the strip's total size stays stable.
+    live.getState().pushAction("Preflighting thumbnails");
+    const seeds = await preflightThumbnails(group.files, signal);
+    if (seeds.length > 0) {
+      live.getState().seedPendingThumbnails(seeds);
+      live.getState().pushAction(
+        `Seeded ${seeds.length} preview${seeds.length === 1 ? "" : "s"}`,
+      );
+    }
+    if (signal?.aborted) throw new Error("Cancelled");
 
     // ---------------- walking ----------------
     await setStatus(runId, "walking");
@@ -174,6 +230,10 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
             extracted.thumbnailDataUrl,
           );
         }
+        live.getState().setCurrentAction({
+          verb: "reading",
+          subject: `p${extracted.ordinal}`,
+        });
         const result = await visionerCall(
           {
             imageBase64: extracted.imageBase64,
@@ -182,9 +242,11 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
             sessionState,
             pageOrdinal: extracted.ordinal,
             fileName: fileRef.name,
+            documentOutline,
           },
           signal,
         );
+        live.getState().setCurrentAction(null);
         sessionState = result.sessionUpdate;
         live.getState().setCurrentTopic(result.topic);
         live.getState().markPageDone(extracted.ordinal);
@@ -225,6 +287,10 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
 
     for (const sect of allClosedSections) {
       if (signal?.aborted) throw new Error("Cancelled");
+      live.getState().setCurrentAction({
+        verb: "summarising",
+        subject: `§${sect.ordinal}`,
+      });
       const sum = await summariserCall(
         {
           sectionMarkdown: sect.sectionMarkdown,
@@ -233,10 +299,24 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
         },
         signal,
       );
+      live.getState().setCurrentAction(null);
       sect.summary = sum.summary;
       sect.questions = sum.questions;
       sect.concepts = sum.concepts;
       sum.concepts.forEach((c) => allConcepts.add(c));
+
+      // Enrich the section md with markdown links pulled from the pruned
+      // tree's {text → href} map (no-op when no tree was captured).
+      if (treeSummary.textToHref.size > 0) {
+        const enriched = enrichLinks(sect.sectionMarkdown, treeSummary.textToHref);
+        sect.sectionMarkdown = enriched.md;
+        if (enriched.count > 0) {
+          live.getState().bumpLinksEnriched(enriched.count);
+          live.getState().pushAction(
+            `§${sect.ordinal} · enriched ${enriched.count} link${enriched.count === 1 ? "" : "s"}`,
+          );
+        }
+      }
 
       // Write the section md.
       const noteItemId = await writeSectionNote({
@@ -291,6 +371,10 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
       live.getState().setPhase("naming");
       live.getState().pushAction("Naming the group");
       try {
+        live.getState().setCurrentAction({
+          verb: "naming",
+          subject: "the group",
+        });
         const named = await namerCall(
           {
             sectionSummaries: allClosedSections.map((s) => ({
@@ -301,6 +385,7 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
           },
           signal,
         );
+        live.getState().setCurrentAction(null);
         // Atomically migrate _Indexes/<old>/ → _Indexes/<new>/, including
         // every section md, every cropped image, and the folder rows. Without
         // this, the manifest written below would land in the new folder and
@@ -324,7 +409,142 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
     // Wait for any straggling embeds (don't block the manifest on slow ones).
     await Promise.allSettled(embedPromises);
 
+    // Materialise DOM images (worksmith captures). For each one we:
+    //   1. Look up the surrounding DOM context in the pruned tree (heading,
+    //      container role, neighbouring text, link target).
+    //   2. Send the image bytes + that context to the Image Reader agent.
+    //      The agent returns a 1-3 sentence description + tags + a "kind"
+    //      classification (decorative / ui / content).
+    //   3. Drop "decorative" results so the vault doesn't fill up with
+    //      separator strips and background glyphs.
+    //   4. Persist the rest as vault items, with the description as both
+    //      `summary` (search-indexed) and `content` (visible in viewer).
+    //   5. Create a synthetic `section` row per image + a `summary`-kind
+    //      embedding chunk for the description, so the run's vector store
+    //      can answer queries like "the picture of X" or "logo of Y".
+    //
+    // Skipped entirely when the group has no DOM images (i.e. non-worksmith
+    // captures like PDF uploads).
+    let domImagesIndex: Array<{
+      title: string;
+      alt: string;
+      src: string;
+      itemId: string;
+      description: string;
+      tags: string[];
+    }> = [];
+    if (group.domImages.length > 0) {
+      const readImages: IndexerDomImageWithRead[] = [];
+      for (let i = 0; i < group.domImages.length; i++) {
+        if (signal?.aborted) throw new Error("Cancelled");
+        const img = group.domImages[i];
+        live.getState().setCurrentAction({
+          verb: "viewing",
+          subject: `dom-${i + 1}`,
+        });
+        try {
+          const base64 = await readBlobAsBase64(img.blobKey);
+          const ctx = group.prunedTree
+            ? findImageContext(group.prunedTree, img.src)
+            : null;
+          const contextText = ctx ? formatImageContext(ctx) : "";
+          const result = await imageReaderCall(
+            {
+              imageBase64: base64,
+              mimeType: img.mimeType || "image/png",
+              src: img.src,
+              alt: img.alt || "",
+              context: contextText,
+              userContext,
+            },
+            signal,
+          );
+          if (result.kind === "decorative") {
+            await scratch(
+              runId,
+              `- Skipped decorative DOM image dom-${i + 1} (${img.src})`,
+            );
+            continue;
+          }
+          readImages.push({
+            ...img,
+            description: result.description,
+            tags: result.tags,
+            readerKind: result.kind,
+          });
+        } catch (err) {
+          // Reader failed (network, bad bytes, etc.) — keep the image but
+          // without a description so it still appears in the vault.
+          console.warn(`[indexer] image reader failed for dom-${i + 1}:`, err);
+          readImages.push({ ...img });
+        }
+      }
+      live.getState().setCurrentAction(null);
+
+      if (readImages.length > 0) {
+        live.getState().setCurrentAction({
+          verb: "saving",
+          subject: `${readImages.length} DOM image${readImages.length === 1 ? "" : "s"}`,
+        });
+        domImagesIndex = await materialiseDomImages({
+          groupName,
+          domImages: readImages,
+        });
+        live.getState().setCurrentAction(null);
+
+        if (domImagesIndex.length > 0) {
+          live.getState().bumpDomImages(domImagesIndex.length);
+          live.getState().pushAction(
+            `Saved ${domImagesIndex.length} DOM image${domImagesIndex.length === 1 ? "" : "s"}`,
+          );
+        }
+
+        // Embed each described image. One section row per image (kind
+        // "image", topic = description), one summary chunk per image. The
+        // embedPromises array is awaited above this block, so push to a
+        // local promises list and await it before manifest write.
+        const domEmbedPromises: Promise<unknown>[] = [];
+        const db = await getVaultDb();
+        for (const indexed of domImagesIndex) {
+          if (!indexed.description) continue;
+          const sectionRowId = `sec-${crypto.randomUUID()}`;
+          await db.insert(sections).values({
+            id: sectionRowId,
+            runId,
+            sourceItemId: "",
+            noteItemId: indexed.itemId,
+            ordinal: sectionGlobalOrdinal + domImagesIndex.indexOf(indexed) + 1,
+            kind: "image",
+            topic: indexed.alt || indexed.title,
+            contentText: indexed.description,
+            summary: indexed.description,
+            questions: [],
+            concepts: indexed.tags,
+            images: [],
+          });
+          domEmbedPromises.push(
+            embedSectionChunks(
+              sectionRowId,
+              {
+                summary: indexed.description,
+                questions: [],
+                concepts: indexed.tags,
+              },
+              signal,
+            ).catch((err) =>
+              console.warn(
+                `[indexer] dom-image embed failed for ${indexed.title}:`,
+                err,
+              ),
+            ),
+          );
+        }
+        await Promise.allSettled(domEmbedPromises);
+      }
+    }
+
     const conceptIndex = [...allConcepts].sort((a, b) => a.localeCompare(b));
+    live.getState().setCurrentAction({ verb: "writing", subject: "manifest" });
     await writeManifest({
       groupName,
       tagline: "",
@@ -339,8 +559,10 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
         noteItemId: s.noteItemId ?? "",
       })),
       conceptIndex,
+      domImages: domImagesIndex,
     });
 
+    live.getState().setCurrentAction(null);
     await store.getState().applyStatus(runId, "done");
     live.getState().finish(true);
     live.getState().pushAction(`Done · ${allClosedSections.length} sections`);
@@ -351,11 +573,28 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[indexer] run failed:", message);
-    await store.getState().applyStatus(runId, "failed", { error: message });
-    live.getState().finish(false);
-    live.getState().pushAction(`Failed: ${message}`);
-    await scratch(runId, `\n## Failed: ${message}`);
+    // Distinguish user-cancelled runs (signal.aborted with the registry's
+    // sentinel reason) from genuine failures so the queue + UI reflect intent.
+    const cancelled =
+      signal?.aborted &&
+      (signal.reason === USER_CANCELLED ||
+        message.toLowerCase().includes("cancelled") ||
+        message.toLowerCase().includes("aborted"));
+    if (cancelled) {
+      console.warn("[indexer] run cancelled:", message);
+      live.getState().setCurrentAction(null);
+      await store.getState().applyStatus(runId, "cancelled");
+      live.getState().finish(false);
+      live.getState().pushAction(`Cancelled`);
+      await scratch(runId, `\n## Cancelled`);
+    } else {
+      console.error("[indexer] run failed:", message);
+      live.getState().setCurrentAction(null);
+      await store.getState().applyStatus(runId, "failed", { error: message });
+      live.getState().finish(false);
+      live.getState().pushAction(`Failed: ${message}`);
+      await scratch(runId, `\n## Failed: ${message}`);
+    }
   }
 }
 
@@ -450,6 +689,35 @@ function dedupeConsecutiveHeadings(md: string): string {
   }
   for (let i = 0; i < pendingBlanks; i++) out.push("");
   return out.join("\n");
+}
+
+/**
+ * Read an OPFS blob (by key) and return its bytes as a bare base64 string
+ * — no `data:` prefix. Used to ship DOM image bytes to the image-reader
+ * agent without re-downloading them from the original page.
+ */
+async function readBlobAsBase64(blobKey: string): Promise<string> {
+  const url = await readBlobUrl(blobKey);
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = String(reader.result ?? "");
+        const idx = dataUrl.indexOf("base64,");
+        if (idx < 0) {
+          reject(new Error("Reader returned non-base64 data URL"));
+          return;
+        }
+        resolve(dataUrl.slice(idx + "base64,".length));
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 async function embedSectionChunks(

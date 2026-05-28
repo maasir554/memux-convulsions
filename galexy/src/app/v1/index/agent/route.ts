@@ -1,7 +1,9 @@
 import {
+  imageReader,
   namer,
   summariser,
   visioner,
+  type ImageReaderInput,
   type NamerInput,
   type SummariserInput,
   type VisionerInput,
@@ -13,7 +15,8 @@ export const dynamic = "force-dynamic";
 type AgentBody =
   | { kind: "visioner"; input: VisionerInput }
   | { kind: "summariser"; input: SummariserInput }
-  | { kind: "namer"; input: NamerInput };
+  | { kind: "namer"; input: NamerInput }
+  | { kind: "imageReader"; input: ImageReaderInput };
 
 export async function POST(req: Request): Promise<Response> {
   let body: AgentBody;
@@ -37,6 +40,9 @@ export async function POST(req: Request): Promise<Response> {
         break;
       case "namer":
         result = await namer(body.input, req.signal);
+        break;
+      case "imageReader":
+        result = await imageReader(body.input, req.signal);
         break;
       default: {
         const _exhaustive: never = body;

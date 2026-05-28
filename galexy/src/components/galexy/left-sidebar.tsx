@@ -2,10 +2,9 @@
 
 import { useMemo, useState } from "react";
 import {
-  CheckSquare,
+  ListChecks,
   Plus,
   Search,
-  Square,
   Trash2,
 } from "lucide-react";
 
@@ -65,6 +64,10 @@ type LeftSidebarProps = {
   onDeleteItem: (id: string) => void;
   onDeleteFolder: (name: string) => void;
   onDeleteBulk: (itemIds: string[], folderPaths: string[]) => void;
+  onRenameItem: (id: string) => void;
+  onRenameFolder: (name: string) => void;
+  onMoveItem: (id: string, folder: string) => void;
+  onMoveFolder: (oldPath: string, newParent: string) => void;
 };
 
 const VIEW_TITLES: Record<LeftView, string> = {
@@ -145,6 +148,10 @@ export function LeftSidebar({
   onDeleteItem,
   onDeleteFolder,
   onDeleteBulk,
+  onRenameItem,
+  onRenameFolder,
+  onMoveItem,
+  onMoveFolder,
 }: LeftSidebarProps) {
   const [creating, setCreating] = useState<CreatingState | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -294,11 +301,7 @@ export function LeftSidebar({
                     multiSelect && "bg-sidebar-accent text-foreground",
                   )}
                 >
-                  {multiSelect ? (
-                    <CheckSquare className="size-3.5" />
-                  ) : (
-                    <Square className="size-3.5" />
-                  )}
+                  <ListChecks className="size-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
@@ -337,6 +340,10 @@ export function LeftSidebar({
             onUpload={handleUpload}
             onDeleteItem={onDeleteItem}
             onDeleteFolder={onDeleteFolder}
+            onRenameItem={onRenameItem}
+            onRenameFolder={onRenameFolder}
+            onMoveItem={onMoveItem}
+            onMoveFolder={onMoveFolder}
             multiSelect={multiSelect}
             selected={selected}
             onToggleSelect={toggleSelect}

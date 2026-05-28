@@ -13,6 +13,7 @@ import {
   Files as FilesIcon,
   Globe,
   Hash,
+  Loader2,
   Pen,
   Sparkles,
   X,
@@ -20,6 +21,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { useBlobUrl } from "@/components/galexy/use-blob-url";
+import { useLiveProgress, type CurrentAction } from "@/lib/indexer/live-progress";
 import type { IndexerFileRef } from "@/lib/db/schema";
 
 /* ============================================================================
@@ -112,8 +114,12 @@ type ParsedPrompt =
 const URL_RE = /^Captured from (.+)$/m;
 const TITLE_RE = /^Title: (.+)$/m;
 const CAPTURED_RE = /^Captured at: (.+)$/m;
-const USER_CTX_RE = /User context:\n([\s\S]*?)(?=\n\nPruned accessibility tree|$)/;
-const HAS_TREE_RE = /Pruned accessibility tree/;
+// `User context:` now ends the prompt (the legacy JSON-tree block that used
+// to follow is gone). Trailing-anchor `$` is enough.
+const USER_CTX_RE = /User context:\n([\s\S]*?)$/;
+// Case-insensitive: the new compact form starts with "A pruned…" (lowercase
+// p), while legacy captures used "Pruned accessibility tree".
+const HAS_TREE_RE = /pruned accessibility tree/i;
 
 export function parseCapturePrompt(prompt: string): ParsedPrompt {
   const url = URL_RE.exec(prompt)?.[1]?.trim();
@@ -174,15 +180,15 @@ export function SourceCard({ prompt }: { prompt: string }) {
     );
   }
 
+  const host = hostOf(parsed.url);
+
   return (
     <div className="space-y-2">
       <div className="flex items-start gap-3 rounded-lg border bg-card/40 px-3 py-2.5">
-        <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-          <Globe className="size-3.5" />
-        </div>
+        <SiteFavicon host={host} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">
-            {parsed.title || hostOf(parsed.url) || "Web capture"}
+            {parsed.title || host || "Web capture"}
           </div>
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             {parsed.url && (
@@ -227,6 +233,35 @@ export function SourceCard({ prompt }: { prompt: string }) {
           {parsed.userContext}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Renders the captured site's favicon as a small avatar. Pulls from Google's
+ * favicon service (returns a 64px PNG, well-cached, no CORS issues). Falls
+ * back to a Globe icon if the request fails or no host is known.
+ */
+function SiteFavicon({ host }: { host: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!host || failed) {
+    return (
+      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+        <Globe className="size-3.5" />
+      </div>
+    );
+  }
+  return (
+    <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md bg-card/60">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`}
+        alt=""
+        width={20}
+        height={20}
+        onError={() => setFailed(true)}
+        className="size-5 object-contain"
+      />
     </div>
   );
 }
@@ -537,11 +572,12 @@ function parseScratchpad(md: string): ScratchEvent[] {
 
 export function ScratchpadStream({ md }: { md: string }) {
   const events = useMemo(() => parseScratchpad(md), [md]);
+  const currentAction = useLiveProgress((s) => s.currentAction);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll to bottom on new events, but only if the user is already
-  // near the bottom — so they can scroll up to read history without being
-  // yanked away.
+  // Auto-scroll to bottom on new events / when the live action changes,
+  // but only if the user is already near the bottom — so they can scroll
+  // up to read history without being yanked away.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -549,19 +585,21 @@ export function ScratchpadStream({ md }: { md: string }) {
     if (isNearBottom) {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
-  }, [events.length]);
+  }, [events.length, currentAction]);
+
+  const isEmpty = events.length === 0 && !currentAction;
 
   return (
     <CollapsibleSection
       icon={<Activity className="size-4" />}
       title="Agent timeline"
       rightLabel={
-        events.length === 0
+        events.length === 0 && !currentAction
           ? "waiting…"
           : `${events.length} event${events.length === 1 ? "" : "s"}`
       }
     >
-      {events.length === 0 ? (
+      {isEmpty ? (
         <div className="px-3 py-6 text-center text-[11px] italic text-muted-foreground">
           The agent will narrate its work here.
         </div>
@@ -579,10 +617,43 @@ export function ScratchpadStream({ md }: { md: string }) {
                 <EventRow event={e} />
               </li>
             ))}
+            {currentAction && (
+              <li
+                key="__current-action"
+                className="animate-in fade-in slide-in-from-bottom-1 duration-200"
+              >
+                <CurrentActionRow action={currentAction} />
+              </li>
+            )}
           </ol>
         </div>
       )}
     </CollapsibleSection>
+  );
+}
+
+/**
+ * Transient "this is happening right now" row at the bottom of the timeline.
+ * Spinner icon + mono subject prefix + shimmer-animated verb. Replaced by the
+ * concrete EventRow once the agent call lands and the scratchpad updates.
+ */
+function CurrentActionRow({ action }: { action: NonNullable<CurrentAction> }) {
+  return (
+    <div className="flex items-start gap-2.5 text-[12px] leading-snug">
+      <div className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
+        <Loader2 className="size-3.5 animate-spin text-primary [animation-duration:1.4s]" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate">
+          {action.subject && (
+            <span className="font-mono text-muted-foreground">{action.subject}</span>
+          )}
+          <span className={cn("ai-text-shimmer", action.subject && "ml-2")}>
+            {action.verb}…
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 

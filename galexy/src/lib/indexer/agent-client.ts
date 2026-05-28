@@ -6,6 +6,8 @@
  */
 
 import type {
+  ImageReaderInput,
+  ImageReaderOutput,
   NamerInput,
   NamerOutput,
   SummariserInput,
@@ -57,6 +59,13 @@ export function namerCall(
   signal?: AbortSignal,
 ): Promise<NamerOutput> {
   return callAgent("namer", input, signal);
+}
+
+export function imageReaderCall(
+  input: ImageReaderInput,
+  signal?: AbortSignal,
+): Promise<ImageReaderOutput> {
+  return callAgent("imageReader", input, signal);
 }
 
 /** Embed batch — uses /v1/embed directly (no agent dispatch needed). */

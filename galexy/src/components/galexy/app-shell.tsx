@@ -25,6 +25,10 @@ import {
   type Note,
 } from "@/lib/mock-notes";
 import { useVault } from "@/components/galexy/use-vault";
+import {
+  ConfirmDialog,
+  type ConfirmRequest,
+} from "@/components/galexy/confirm-dialog";
 
 const ANIM_MS = 240;
 
@@ -33,8 +37,13 @@ export function AppShell() {
     notes: loadedNotes,
     folders: loadedFolders,
     updateContent,
+    updateLinks,
     updateSheetMeta,
     updatePdfAnnotations,
+    renameItem,
+    renameFolder,
+    moveItem,
+    moveFolder,
     createNote,
     createFolder,
     uploadFiles,
@@ -51,6 +60,10 @@ export function AppShell() {
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [animating, setAnimating] = useState(false);
   const [query, setQuery] = useState("");
+  /** Pending confirmation request rendered by <ConfirmDialog>. */
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(
+    null,
+  );
 
   const leftPanel = usePanelRef();
   const rightPanel = usePanelRef();
@@ -220,33 +233,53 @@ export function AppShell() {
     });
   }
 
-  async function handleDeleteItem(id: string) {
+  function handleDeleteItem(id: string) {
     const note = byId.get(id);
     const label = note?.title ?? "this item";
-    if (!window.confirm(`Delete “${label}”? This can't be undone.`)) return;
-    dropTab(id);
-    try {
-      await removeItem(id);
-    } catch {
-      // useVault already logs + rolls back local state; surface tab again.
-      setOpenTabs((tabs) => (tabs.includes(id) ? tabs : [...tabs, id]));
-    }
+    setConfirmRequest({
+      title: `Delete “${label}”?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      onConfirm: async () => {
+        dropTab(id);
+        try {
+          await removeItem(id);
+        } catch {
+          // useVault already logs + rolls back state; restore the tab so
+          // the user isn't left without a record that the action failed.
+          setOpenTabs((tabs) =>
+            tabs.includes(id) ? tabs : [...tabs, id],
+          );
+        }
+      },
+    });
   }
 
-  async function handleDeleteFolder(name: string) {
+  function handleDeleteFolder(name: string) {
     const prefix = `${name}/`;
     const childCount = notes.filter(
       (n) => n.folder === name || n.folder.startsWith(prefix),
     ).length;
-    const msg =
-      childCount === 0
-        ? `Delete folder “${name}”?`
-        : `Delete folder “${name}” and its ${childCount} item${
-            childCount === 1 ? "" : "s"
-          }? This can't be undone.`;
-    if (!window.confirm(msg)) return;
-    const removed = await removeFolder(name, { cascade: childCount > 0 });
-    for (const id of removed) dropTab(id);
+    setConfirmRequest({
+      title: `Delete folder “${name}”?`,
+      description:
+        childCount === 0
+          ? "This folder is empty. It can't be recovered."
+          : "Everything inside this folder will be deleted too. This can't be undone.",
+      highlights:
+        childCount === 0
+          ? undefined
+          : [
+              `${childCount} item${childCount === 1 ? "" : "s"} will be removed`,
+            ],
+      confirmLabel: "Delete folder",
+      onConfirm: async () => {
+        const removed = await removeFolder(name, {
+          cascade: childCount > 0,
+        });
+        for (const id of removed) dropTab(id);
+      },
+    });
   }
 
   /**
@@ -255,10 +288,10 @@ export function AppShell() {
    * and shows one combined confirmation so the user isn't clicking through
    * N prompts.
    */
-  async function handleDeleteBulk(
+  function handleDeleteBulk(
     itemIds: string[],
     folderPaths: string[],
-  ): Promise<void> {
+  ): void {
     const cascadeIds = new Set<string>(itemIds);
     for (const path of folderPaths) {
       const prefix = `${path}/`;
@@ -272,28 +305,69 @@ export function AppShell() {
     const folderCount = folderPaths.length;
     if (fileCount === 0 && folderCount === 0) return;
 
-    const parts: string[] = [];
+    const highlights: string[] = [];
     if (fileCount > 0)
-      parts.push(`${fileCount} item${fileCount === 1 ? "" : "s"}`);
+      highlights.push(
+        `${fileCount} item${fileCount === 1 ? "" : "s"} will be removed`,
+      );
     if (folderCount > 0)
-      parts.push(`${folderCount} folder${folderCount === 1 ? "" : "s"}`);
-    const msg = `Delete ${parts.join(" and ")}? This can't be undone.`;
-    if (!window.confirm(msg)) return;
+      highlights.push(
+        `${folderCount} folder${folderCount === 1 ? "" : "s"} will be removed`,
+      );
 
-    // Items first, then folders — so cascade-counted items aren't double-
-    // counted by removeFolder's own cascade walk.
-    for (const id of itemIds) {
-      dropTab(id);
-      try {
-        await removeItem(id);
-      } catch {
-        // useVault logs + rolls back state; nothing else to do here.
-      }
+    setConfirmRequest({
+      title: "Delete selected?",
+      description: "This can't be undone.",
+      highlights,
+      confirmLabel: "Delete",
+      onConfirm: async () => {
+        // Items first, then folders — so cascade-counted items aren't
+        // double-counted by removeFolder's own cascade walk.
+        for (const id of itemIds) {
+          dropTab(id);
+          try {
+            await removeItem(id);
+          } catch {
+            // useVault logs + rolls back state.
+          }
+        }
+        for (const path of folderPaths) {
+          const removed = await removeFolder(path, { cascade: true });
+          for (const id of removed) dropTab(id);
+        }
+      },
+    });
+  }
+
+  function handleRenameItem(id: string) {
+    const note = byId.get(id);
+    if (!note) return;
+    const next = window.prompt("Rename to:", note.title);
+    if (next == null) return; // user cancelled
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === note.title) return;
+    renameItem(id, trimmed);
+  }
+
+  function handleRenameFolder(path: string) {
+    const lastSlash = path.lastIndexOf("/");
+    const parent = lastSlash >= 0 ? path.slice(0, lastSlash) : "";
+    const oldSegment = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
+    const next = window.prompt(
+      `Rename folder "${oldSegment}":`,
+      oldSegment,
+    );
+    if (next == null) return;
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === oldSegment) return;
+    // Reject slashes — those would mean "move to a different parent", which
+    // is a separate operation and we don't want to silently re-parent.
+    if (trimmed.includes("/")) {
+      window.alert("Folder names can't contain a slash.");
+      return;
     }
-    for (const path of folderPaths) {
-      const removed = await removeFolder(path, { cascade: true });
-      for (const id of removed) dropTab(id);
-    }
+    const newPath = parent ? `${parent}/${trimmed}` : trimmed;
+    void renameFolder(path, newPath);
   }
 
   return (
@@ -340,6 +414,10 @@ export function AppShell() {
               onDeleteItem={handleDeleteItem}
               onDeleteFolder={handleDeleteFolder}
               onDeleteBulk={handleDeleteBulk}
+              onRenameItem={handleRenameItem}
+              onRenameFolder={handleRenameFolder}
+              onMoveItem={moveItem}
+              onMoveFolder={(old, newParent) => void moveFolder(old, newParent)}
             />
           </ResizablePanel>
 
@@ -395,7 +473,9 @@ export function AppShell() {
               activeNote={activeNote}
               backlinks={backlinks}
               outgoing={outgoing}
+              allNotes={notes}
               onOpen={openNote}
+              onUpdateLinks={updateLinks}
               onToggleRight={toggleRight}
             />
           </ResizablePanel>
@@ -425,6 +505,13 @@ export function AppShell() {
       </div>
 
       <StatusBar activeNote={activeNote} backlinkCount={backlinks.length} />
+
+      {/* Custom confirmation dialog — replaces window.confirm() for the
+          three delete flows so the modal matches app theming. */}
+      <ConfirmDialog
+        request={confirmRequest}
+        onClose={() => setConfirmRequest(null)}
+      />
     </div>
   );
 }

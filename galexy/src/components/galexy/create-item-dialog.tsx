@@ -30,6 +30,14 @@ import type { FolderNode } from "@/lib/mock-notes";
 
 import type { CreateKind } from "@/components/galexy/file-explorer";
 
+/**
+ * Sentinel used by the Location select to represent "vault root". Radix
+ * Select forbids `value=""` on items (empty string is reserved for "clear
+ * selection"), so we map the internal "" folder ↔ this sentinel only at the
+ * Select boundary.
+ */
+const ROOT_KEY = "__root__";
+
 const KIND_OPTIONS: { value: CreateKind; label: string; Icon: typeof FilePlus }[] = [
   { value: "markdown", label: "Markdown note", Icon: FilePlus },
   { value: "code", label: "Code file", Icon: SquareCode },
@@ -196,12 +204,15 @@ export function CreateItemDialog({
 
           <div className="grid gap-2">
             <Label htmlFor="create-location">Location</Label>
-            <Select value={folder} onValueChange={setFolder}>
+            <Select
+              value={folder === "" ? ROOT_KEY : folder}
+              onValueChange={(v) => setFolder(v === ROOT_KEY ? "" : v)}
+            >
               <SelectTrigger id="create-location" className="w-full">
                 <SelectValue placeholder="Vault root" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Vault root</SelectItem>
+                <SelectItem value={ROOT_KEY}>Vault root</SelectItem>
                 {flatFolders.map(({ path, label, depth }) => (
                   <SelectItem key={path} value={path}>
                     <span

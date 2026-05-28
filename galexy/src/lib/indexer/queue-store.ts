@@ -17,6 +17,7 @@ import {
   updateDraft,
   type Group,
 } from "@/lib/indexer/queue-db";
+import { cancelRun } from "@/lib/indexer/runs-registry";
 import type { RunStatus } from "@/lib/db/schema";
 
 type IndexerStore = {
@@ -43,6 +44,7 @@ type IndexerStore = {
   enqueueActive: () => Promise<void>;
   dequeueGroup: (id: string) => Promise<void>;
   deleteGroupById: (id: string) => Promise<void>;
+  cancelAndDelete: (id: string) => Promise<void>;
   reorderGroup: (id: string, newPos: number) => Promise<void>;
 
   /** Orchestrator-side helpers (Phase 2+). */
@@ -136,6 +138,28 @@ export const useIndexerStore = create<IndexerStore>((set, get) => ({
   },
 
   async deleteGroupById(id) {
+    await deleteGroup(id);
+    set((s) => ({
+      groups: (s.groups ?? []).filter((g) => g.id !== id),
+      activeId: s.activeId === id ? null : s.activeId,
+    }));
+  },
+
+  async cancelAndDelete(id) {
+    // 1. Mark cancelled in the DB first so any in-flight orchestrator writes
+    //    that race the deletion update a "cancelled" row instead of trying
+    //    to set "failed" on a row we're about to remove.
+    try {
+      await setStatus(id, "cancelled");
+    } catch {
+      // Status set may fail if the row's already gone — tolerable.
+    }
+    // 2. Abort the orchestrator's AbortController via the registry. Its
+    //    next signal.aborted check throws "Cancelled" and the catch block
+    //    marks the run cancelled (already done above as a backstop).
+    cancelRun(id);
+    // 3. Now safe to forcefully delete — the gate in deleteGroup is relaxed,
+    //    and the orchestrator's subsequent writes hit a missing row (no-op).
     await deleteGroup(id);
     set((s) => ({
       groups: (s.groups ?? []).filter((g) => g.id !== id),

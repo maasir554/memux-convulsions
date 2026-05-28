@@ -1,6 +1,7 @@
 import type {
   AccessibilitySnapshot,
   ActivityEvent,
+  DomImage,
   DwellState,
   LastScroll,
   SavedCapture,
@@ -876,18 +877,41 @@ function sleep(ms: number): Promise<void> {
  * "MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND quota" and aborts the run. This
  * helper enforces a 520ms minimum gap between calls so we stay under the
  * limit regardless of how fast the surrounding code runs.
+ *
+ * Also hides the on-page capture ring (worksmith.ring.hide) before each
+ * shot and restores it (worksmith.ring.show) after. The content script
+ * waits two animation frames before ack'ing the hide, so by the time we
+ * call captureVisibleTab the ring is fully transparent and isn't baked
+ * into the screenshot.
  */
 const CAPTURE_MIN_GAP_MS = 520;
 let lastCaptureAt = 0;
 async function captureVisibleTabThrottled(
   windowId: number,
+  tabId: number,
   options: { format?: "jpeg" | "png"; quality?: number },
+  ringOpts: { ring?: boolean } = {},
 ): Promise<string> {
   const now = Date.now();
   const wait = lastCaptureAt + CAPTURE_MIN_GAP_MS - now;
   if (wait > 0) await sleep(wait);
+  // Only toggle the on-page ring around the shot when the caller has
+  // actually drawn one. The background 30s auto-capture path must not
+  // create a ring on a tab the user never interacted with.
+  if (ringOpts.ring) {
+    await chrome.tabs
+      .sendMessage(tabId, { type: "worksmith.ring.hide" })
+      .catch(() => undefined);
+  }
   const url = await chrome.tabs.captureVisibleTab(windowId, options);
   lastCaptureAt = Date.now();
+  if (ringOpts.ring) {
+    // Fire-and-forget restore so the next iteration's hide → frame paint can
+    // race with whatever the orchestrator does next.
+    void chrome.tabs
+      .sendMessage(tabId, { type: "worksmith.ring.show" })
+      .catch(() => undefined);
+  }
   return url;
 }
 
@@ -931,8 +955,12 @@ async function runUserCapture(
   // tabs (opened before the last extension reload) don't have it.
   await ensureContentScript(tabId);
 
-  // Kick off the rainbow flash on the page (fire and forget).
-  void chrome.tabs.sendMessage(tabId, { type: "worksmith.flash" }).catch(() => undefined);
+  // Show the persistent capture ring. Stays visible for the full duration
+  // of this run; captureVisibleTabThrottled toggles it hidden→visible
+  // around each shot so it doesn't get baked into the screenshots.
+  void chrome.tabs
+    .sendMessage(tabId, { type: "worksmith.ring.show", create: true })
+    .catch(() => undefined);
 
   try {
     const initial = await chrome.tabs
@@ -946,7 +974,12 @@ async function runUserCapture(
     const screenshots: string[] = [];
 
     if (mode === "snap") {
-      const url = await captureVisibleTabThrottled(windowId, { format: "jpeg", quality: 80 });
+      const url = await captureVisibleTabThrottled(
+        windowId,
+        tabId,
+        { format: "jpeg", quality: 80 },
+        { ring: true },
+      );
       screenshots.push(url);
     } else {
       const MAX_SHOTS = 15;
@@ -954,18 +987,41 @@ async function runUserCapture(
       await chrome.tabs
         .sendMessage(tabId, { type: "worksmith.scrollStep", to: 0 })
         .catch(() => undefined);
-      await sleep(280);
+      await sleep(320);
 
       let prevTop = -1;
+      let consecutiveNullSteps = 0;
       while (screenshots.length < MAX_SHOTS) {
-        const shot = await captureVisibleTabThrottled(windowId, { format: "jpeg", quality: 80 });
+        const shot = await captureVisibleTabThrottled(
+          windowId,
+          tabId,
+          { format: "jpeg", quality: 80 },
+          { ring: true },
+        );
         screenshots.push(shot);
 
         const stepResp = await chrome.tabs
           .sendMessage(tabId, { type: "worksmith.scrollStep", by: viewportHeight })
           .catch(() => null);
         const page = stepResp?.scrollState?.page;
-        if (!page) break;
+
+        // Tolerate one dropped scrollStep response — re-ensure the content
+        // script (it may have been swapped out by a navigation / nav-style
+        // SPA route change) and retry once before giving up.
+        if (!page) {
+          consecutiveNullSteps++;
+          console.warn(
+            `[capture] scrollStep returned no state (try ${consecutiveNullSteps}); shots=${screenshots.length}`,
+          );
+          if (consecutiveNullSteps >= 2) {
+            console.warn("[capture] two consecutive null steps — stopping early");
+            break;
+          }
+          await ensureContentScript(tabId);
+          await sleep(180);
+          continue;
+        }
+        consecutiveNullSteps = 0;
 
         const atBottom = page.scrollY + page.viewportHeight >= page.documentHeight - 2;
         if (page.scrollY === prevTop) {
@@ -973,18 +1029,29 @@ async function runUserCapture(
         }
         prevTop = page.scrollY;
 
+        // Settle: let the page render whatever fold just came into view
+        // (lazy images, hydration, etc.) before the next capture. Without
+        // this the throttle's 520ms is the only gap and it starts BEFORE
+        // capture, leaving zero post-scroll render time.
+        await sleep(220);
+
         if (atBottom) {
           // capture the final viewport too, then stop
           if (screenshots.length < MAX_SHOTS) {
-            const last = await captureVisibleTabThrottled(windowId, {
-              format: "jpeg",
-              quality: 80,
-            });
+            const last = await captureVisibleTabThrottled(
+              windowId,
+              tabId,
+              { format: "jpeg", quality: 80 },
+              { ring: true },
+            );
             screenshots.push(last);
           }
           break;
         }
       }
+      console.log(
+        `[capture] full done · ${screenshots.length} shots`,
+      );
 
       // restore original scroll position
       await chrome.tabs
@@ -1004,6 +1071,15 @@ async function runUserCapture(
         children: [],
       };
     const nodeCount: number = ax?.nodeCount ?? 0;
+
+    // Pull every DOM image's bytes through the SW fetch (CORS-bypassing).
+    // Failed individual fetches are kept in the array with an `error` field
+    // so the consumer can still see what the page had even when we couldn't
+    // get the bytes.
+    const domImages = await collectDomImages(tree).catch((err) => {
+      console.warn("[capture] collectDomImages failed:", normalizeError(err));
+      return [] as DomImage[];
+    });
 
     const capturedAt = now();
     const capture: SavedCapture = {
@@ -1028,6 +1104,7 @@ async function runUserCapture(
       nodeCount,
       viewport: { width: viewportWidth, height: viewportHeight },
       documentHeight,
+      domImages,
     };
 
     state.userCaptures = [capture, ...state.userCaptures].slice(0, MAX_USER_CAPTURES);
@@ -1044,8 +1121,16 @@ async function runUserCapture(
     // Try to ship to a galexy tab right away. Silently no-ops if no galexy
     // tab is open / not on /memux/index.
     void dispatchPendingToGalexy();
+    // Dismiss the on-page capture ring.
+    void chrome.tabs
+      .sendMessage(tabId, { type: "worksmith.ring.dismiss" })
+      .catch(() => undefined);
     return { ok: true, id: capture.id };
   } catch (error) {
+    // Make sure the ring is taken down even on failure paths.
+    void chrome.tabs
+      .sendMessage(tabId, { type: "worksmith.ring.dismiss" })
+      .catch(() => undefined);
     return { ok: false, error: normalizeError(error) };
   }
 }
@@ -1060,7 +1145,7 @@ async function captureVisibleTabSafely(
 
   if (capturable) {
     try {
-      return await captureVisibleTabThrottled(windowId!, { format: "jpeg", quality: 72 });
+      return await captureVisibleTabThrottled(windowId!, tabId, { format: "jpeg", quality: 72 });
     } catch (error) {
       // captureVisibleTab can still fail on an occluded window; fall through to retry.
       if (tab?.dwell) {
@@ -1203,6 +1288,109 @@ function serializeState(): WorksmithState {
  * content_scripts entry on failure. CRXJS rewrites that entry at build time
  * with the hashed bundle filename, so we don't need to know the exact path.
  */
+/**
+ * Walk the accessibility tree, collect every unique image src, and fetch
+ * each one's bytes through the service-worker context. Because the
+ * extension has `host_permissions: <all_urls>`, the SW's fetch bypasses the
+ * page's CORS policy — we can grab cross-origin images that the page itself
+ * couldn't have read via canvas.
+ *
+ * Concurrency capped at IMG_FETCH_CONCURRENCY so a tab with 200 images
+ * doesn't fan out to 200 parallel fetches.
+ */
+const IMG_FETCH_CONCURRENCY = 6;
+const IMG_FETCH_MAX_BYTES = 4 * 1024 * 1024; // 4 MB per image, generous.
+const IMG_FETCH_TIMEOUT_MS = 8000;
+
+async function collectDomImages(tree: TreeNode): Promise<DomImage[]> {
+  // Flatten the tree → unique (src, alt) pairs. First occurrence wins so the
+  // image keeps its first-mention alt text.
+  const seen = new Map<string, DomImage>();
+  function walk(node: TreeNode | undefined): void {
+    if (!node) return;
+    const src = node.src;
+    if (src && /^https?:/i.test(src) && !seen.has(src)) {
+      const rect = node.rect ?? undefined;
+      seen.set(src, {
+        src,
+        alt: node.name?.trim() || undefined,
+        width: rect?.width ? Math.round(rect.width) : undefined,
+        height: rect?.height ? Math.round(rect.height) : undefined,
+      });
+    }
+    for (const child of node.children ?? []) walk(child);
+  }
+  walk(tree);
+  const list = [...seen.values()];
+
+  // Concurrency-limited fetch.
+  const out: DomImage[] = [];
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = cursor++;
+      if (i >= list.length) return;
+      out[i] = await fetchOne(list[i]);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(IMG_FETCH_CONCURRENCY, list.length) }, worker),
+  );
+  return out;
+}
+
+async function fetchOne(img: DomImage): Promise<DomImage> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort("timeout"), IMG_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(img.src, { signal: ac.signal, credentials: "omit" });
+    if (!res.ok) {
+      return { ...img, error: `HTTP ${res.status}` };
+    }
+    // Reject responses that aren't actually images. Some endpoints 200 with
+    // HTML (a CDN login page, a soft-404, etc.) — the bytes encode fine as
+    // base64 but the <img> tag can't decode them and we'd ship a vault item
+    // that renders as a broken-image icon. Bail before we get there.
+    const headerType = (res.headers.get("content-type") ?? "").toLowerCase();
+    if (headerType && !headerType.startsWith("image/")) {
+      return { ...img, error: `not an image: ${headerType}` };
+    }
+    const contentLength = Number(res.headers.get("content-length") ?? "0");
+    if (contentLength && contentLength > IMG_FETCH_MAX_BYTES) {
+      return { ...img, error: `too large (${contentLength}b)` };
+    }
+    const blob = await res.blob();
+    if (blob.size === 0) {
+      return { ...img, error: "empty body" };
+    }
+    if (blob.size > IMG_FETCH_MAX_BYTES) {
+      return { ...img, error: `too large (${blob.size}b)` };
+    }
+    const blobType = (blob.type || headerType || "").toLowerCase();
+    // Some servers omit the header but the blob still carries a mime from
+    // the magic bytes. If neither says image/, refuse.
+    if (blobType && !blobType.startsWith("image/")) {
+      return { ...img, error: `blob mime not image/: ${blobType}` };
+    }
+    const mimeType = blobType || "image/png";
+    const dataUri = await blobToDataUri(blob);
+    return { ...img, dataUri, mimeType };
+  } catch (err) {
+    return { ...img, error: normalizeError(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function blobToDataUri(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
 async function ensureContentScript(tabId: number): Promise<boolean> {
   try {
     const resp = await chrome.tabs.sendMessage(tabId, { type: "worksmith.ping" });
@@ -1250,14 +1438,20 @@ interface MemuxOutboundCapture {
   context?: string;
   /** Data URLs, in capture order. */
   screenshots: string[];
-  /** Pruned a11y tree — typically 30-200 nodes after lib/prune. */
+  /** Pruned a11y tree — now includes per-node src + href when present. */
   prunedTree: TreeNode;
   nodeCount: number;
+  /** DOM images with their fetched bytes inline. Cross-origin OK. */
+  domImages?: DomImage[];
   viewport?: { width: number; height: number };
   documentHeight?: number;
 }
 
 function captureToOutbound(c: SavedCapture): MemuxOutboundCapture {
+  // Drop DOM images that failed to fetch (no dataUri) so the receiver doesn't
+  // have to filter them. Keep the failed-fetch metadata around in the local
+  // SavedCapture for debugging.
+  const domImages = (c.domImages ?? []).filter((img) => !!img.dataUri);
   return {
     externalId: c.id,
     kind: c.kind === "stable" ? "snap" : c.kind,
@@ -1268,6 +1462,7 @@ function captureToOutbound(c: SavedCapture): MemuxOutboundCapture {
     screenshots: c.screenshots,
     prunedTree: pruneAccessibilityTree(c.accessibilitySnapshot.tree),
     nodeCount: c.nodeCount,
+    domImages: domImages.length > 0 ? domImages : undefined,
     viewport: c.viewport,
     documentHeight: c.documentHeight,
   };

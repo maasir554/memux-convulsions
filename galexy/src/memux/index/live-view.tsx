@@ -28,8 +28,9 @@ import { FilePreviewModal } from "./run-view";
  * Counters and recent activity live in the centre editor — this pane is
  * pure visual focus.
  */
-export function LiveView() {
+export function LiveView({ open }: { open: boolean }) {
   const phase = useLiveProgress((s) => s.phase);
+  const liveRunId = useLiveProgress((s) => s.runId);
   const groupName = useLiveProgress((s) => s.groupName);
   const activeFileName = useLiveProgress((s) => s.activeFileName);
   const activeFileIndex = useLiveProgress((s) => s.activeFileIndex);
@@ -43,35 +44,62 @@ export function LiveView() {
 
   const [previewFileIdx, setPreviewFileIdx] = useState<number | null>(null);
 
-  if (phase === "idle") return null;
+  // The pane stays mounted so width/opacity can transition. It's "active"
+  // (taking up space + visible) only when (a) the user has it open AND (b)
+  // the live store is tracking the currently-selected group. Otherwise it
+  // collapses to width 0 with a fade — no abrupt unmount.
+  const isActive =
+    open && phase !== "idle" && !!group && group.id === liveRunId;
 
   return (
-    <aside className="flex h-full w-[34%] min-w-[360px] max-w-[560px] shrink-0 flex-col border-l bg-gradient-to-b from-background to-card/60">
-      <Header phase={phase} groupName={groupName} treeUsed={treeUsed} />
+    <aside
+      // Two layered transitions:
+      //   - the outer width animates 0 → full so the centre pane reflows.
+      //   - the inner content fades + translates so it doesn't pop into a
+      //     0-width box and immediately re-flow at full opacity.
+      // The overflow-hidden on the outer keeps the inner from leaking out
+      // of a partially-collapsed pane mid-animation.
+      className={cn(
+        "flex h-full shrink-0 flex-col overflow-hidden bg-gradient-to-b from-background to-card/60",
+        "transition-[width,min-width,max-width,border-left-width,opacity] duration-300 ease-out motion-reduce:transition-none",
+        isActive
+          ? "w-[34%] min-w-[360px] max-w-[560px] border-l opacity-100"
+          : "w-0 min-w-0 max-w-0 border-l-0 opacity-0",
+      )}
+      aria-hidden={!isActive}
+    >
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col transition-[transform,opacity] duration-300 ease-out motion-reduce:transition-none",
+          isActive ? "translate-x-0 opacity-100" : "translate-x-4 opacity-0",
+        )}
+      >
+        <Header phase={phase} groupName={groupName} treeUsed={treeUsed} />
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
-        <FileMeta
-          activeFileName={activeFileName}
-          activeFileIndex={activeFileIndex}
-          totalFiles={totalFiles}
-        />
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
+          <FileMeta
+            activeFileName={activeFileName}
+            activeFileIndex={activeFileIndex}
+            totalFiles={totalFiles}
+          />
 
-        <Hero
-          phase={phase}
-          dataUrl={activePageDataUrl}
-          activeOrdinal={activePageOrdinal}
-          activeStripIndex={thumbnails.findIndex((t) => t.status === "active")}
-          totalThumbnails={thumbnails.length}
-          topic={currentTopic}
-        />
+          <Hero
+            phase={phase}
+            dataUrl={activePageDataUrl}
+            activeOrdinal={activePageOrdinal}
+            activeStripIndex={thumbnails.findIndex((t) => t.status === "active")}
+            totalThumbnails={thumbnails.length}
+            topic={currentTopic}
+          />
 
-        <ThumbStrip
-          thumbnails={thumbnails}
-          onOpen={(fileIdx) => setPreviewFileIdx(fileIdx)}
-        />
+          <ThumbStrip
+            thumbnails={thumbnails}
+            onOpen={(fileIdx) => setPreviewFileIdx(fileIdx)}
+          />
+        </div>
       </div>
 
-      {previewFileIdx !== null && group && (
+      {previewFileIdx !== null && group && isActive && (
         <FilePreviewModal
           files={group.files}
           initialIndex={previewFileIdx}
@@ -293,7 +321,10 @@ function ThumbStrip({
   return (
     <div
       ref={stripRef}
-      className="no-scrollbar flex max-h-40 shrink-0 flex-wrap gap-1.5 overflow-y-auto pb-1"
+      // px-1 + py-2 gives the active thumb's outline + transform some
+      // breathing room — without it the parent's overflow-hidden + the
+      // strip's own overflow-y-auto chops off the bottom of the last row.
+      className="no-scrollbar flex max-h-44 shrink-0 flex-wrap gap-1.5 overflow-y-auto px-1 py-2"
     >
       {thumbnails.map((t) => (
         <button
@@ -301,11 +332,14 @@ function ThumbStrip({
           key={t.key}
           data-thumb-key={t.key}
           onClick={() => onOpen(t.fileIndex)}
+          // Active state uses an INSET ring (via outline + outline-offset)
+          // instead of an outset box-shadow so it can't escape the strip
+          // and get clipped. Scale is kept modest for the same reason.
           className={cn(
             "group/thumb relative h-16 w-12 shrink-0 overflow-hidden rounded-md border bg-muted/40 transition-all",
-            "hover:border-foreground/40 hover:shadow-md",
+            "hover:border-foreground/40",
             t.status === "active" &&
-              "scale-110 border-primary shadow-[0_0_0_2px_color-mix(in_oklch,var(--primary)_30%,transparent)] hover:border-primary",
+              "scale-[1.06] border-primary outline outline-2 outline-offset-1 outline-primary/40",
             t.status === "done" && "opacity-70",
             t.status === "pending" && "opacity-40",
           )}

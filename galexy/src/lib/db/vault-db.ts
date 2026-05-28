@@ -6,6 +6,7 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   FOLDERS_CREATE,
   INDEXER_DDL,
+  INDEXER_MIGRATIONS,
   ITEMS_CREATE,
   ITEMS_MIGRATIONS,
   concepts,
@@ -74,6 +75,13 @@ async function create(): Promise<VaultDb> {
       await client.exec(stmt);
     } catch (err) {
       console.warn("[vault] indexer DDL failed:", stmt, err);
+    }
+  }
+  for (const stmt of INDEXER_MIGRATIONS) {
+    try {
+      await client.exec(stmt);
+    } catch (err) {
+      console.warn("[vault] indexer migration failed:", stmt, err);
     }
   }
   const db = drizzle(client, {
@@ -185,6 +193,82 @@ export async function persistPdfAnnotations(
     .update(items)
     .set({ pdfAnnotations, updatedAt: new Date() })
     .where(eq(items.id, id));
+}
+
+/** Replace the manually-added outgoing-links list on an item. */
+export async function persistLinks(
+  db: VaultDb,
+  id: string,
+  links: string[],
+): Promise<void> {
+  await db
+    .update(items)
+    .set({ links, updatedAt: new Date() })
+    .where(eq(items.id, id));
+}
+
+/** Move an item to a different folder path. "" moves to vault root. */
+export async function persistItemFolder(
+  db: VaultDb,
+  id: string,
+  folder: string,
+): Promise<void> {
+  await db
+    .update(items)
+    .set({ folder, updatedAt: new Date() })
+    .where(eq(items.id, id));
+}
+
+/** Rename an item — just the title. */
+export async function persistTitle(
+  db: VaultDb,
+  id: string,
+  title: string,
+): Promise<void> {
+  await db
+    .update(items)
+    .set({ title, updatedAt: new Date() })
+    .where(eq(items.id, id));
+}
+
+/**
+ * Rename a folder path AND every nested folder + every item that lives
+ * under it. The rename is a prefix swap: `oldPath` itself plus any descendant
+ * (`${oldPath}/...`) is rewritten to use `newPath`.
+ */
+export async function renameFolderPath(
+  db: VaultDb,
+  oldPath: string,
+  newPath: string,
+): Promise<void> {
+  if (oldPath === newPath) return;
+  const oldPrefix = `${oldPath}/`;
+  // items: exact match → newPath
+  await db
+    .update(items)
+    .set({ folder: newPath, updatedAt: new Date() })
+    .where(eq(items.folder, oldPath));
+  // items: under oldPrefix → rewrite prefix
+  await db.execute(
+    sql`UPDATE items
+        SET folder = ${newPath} || substring(folder FROM ${oldPath.length + 1}),
+            updated_at = now()
+        WHERE folder LIKE ${oldPrefix + "%"}`,
+  );
+  // folders: nested rows first (so the row for the bare path can still be
+  // matched after if we did it the other way around the prefix selector
+  // would no longer match — but either order works because we're using the
+  // OLD path in both WHEREs).
+  await db.execute(
+    sql`UPDATE folders
+        SET name = ${newPath} || substring(name FROM ${oldPath.length + 1})
+        WHERE name LIKE ${oldPrefix + "%"}`,
+  );
+  // folders: the bare row
+  await db
+    .update(folders)
+    .set({ name: newPath })
+    .where(eq(folders.name, oldPath));
 }
 
 export async function insertItem(db: VaultDb, note: Note): Promise<void> {

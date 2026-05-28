@@ -251,6 +251,81 @@ export function extractorFor(
   return extractCode;
 }
 
+/* ------------------------------------------------------ preflight --- */
+
+/**
+ * Render small thumbnails for every image-bearing slot in the group up-front
+ * so the live-view strip shows the full set of pages from the start (instead
+ * of growing one box at a time as the orchestrator walks).
+ *
+ * - Image files: one thumbnail at maxWidth=140 (cheap; same path as the main
+ *   pass uses anyway).
+ * - PDFs: load the doc and render every page at a tiny scale (0.35) to a
+ *   thumbnail. This pays an upfront cost but unlocks the "see the whole
+ *   document" UX. Aborts cleanly if `signal` fires.
+ * - Other kinds (md/csv/code): skipped — they don't have visual previews.
+ */
+export async function preflightThumbnails(
+  files: IndexerFileRef[],
+  signal?: AbortSignal,
+): Promise<Array<{ fileIndex: number; ordinal: number; thumbDataUrl: string }>> {
+  const out: Array<{ fileIndex: number; ordinal: number; thumbDataUrl: string }> = [];
+  for (let i = 0; i < files.length; i++) {
+    if (signal?.aborted) break;
+    const ref = files[i];
+    const lower = ref.name.toLowerCase();
+    const isPdf = ref.mimeType === "application/pdf" || lower.endsWith(".pdf");
+    const isImage = ref.mimeType.startsWith("image/");
+    if (!isPdf && !isImage) continue;
+
+    const file = await fileFromRef(ref).catch(() => null);
+    if (!file) continue;
+
+    if (isImage) {
+      const thumb = await imageBlobToThumbDataUrl(file, 140).catch(() => null);
+      if (thumb) out.push({ fileIndex: i, ordinal: 1, thumbDataUrl: thumb });
+      continue;
+    }
+
+    // PDF: render every page at low scale, just for thumbs.
+    try {
+      const pdfjs = await loadPdfjs();
+      const buffer = await file.arrayBuffer();
+      const doc = await pdfjs.getDocument({
+        data: buffer,
+        cMapUrl: "/pdfjs/cmaps/",
+        cMapPacked: true,
+        standardFontDataUrl: "/pdfjs/standard_fonts/",
+      }).promise;
+      try {
+        for (let p = 1; p <= doc.numPages; p++) {
+          if (signal?.aborted) break;
+          const page = await doc.getPage(p);
+          const viewport = page.getViewport({ scale: 0.35 });
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            page.cleanup();
+            continue;
+          }
+          await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+          const thumb = await canvasToThumbDataUrl(canvas, 140);
+          if (thumb) out.push({ fileIndex: i, ordinal: p, thumbDataUrl: thumb });
+          page.cleanup();
+        }
+      } finally {
+        await doc.destroy();
+      }
+    } catch {
+      // PDF couldn't be preflighted — orchestrator will still progressively
+      // fill thumbs during the main pass.
+    }
+  }
+  return out;
+}
+
 /** Re-hydrate a File from OPFS by blobKey. */
 export async function fileFromRef(ref: IndexerFileRef): Promise<File> {
   if (!ref.blobKey) throw new Error(`File ref ${ref.id} has no blobKey`);

@@ -11,8 +11,12 @@ import {
   loadAllFolders,
   loadAllItems,
   persistContent,
+  persistItemFolder,
+  persistLinks,
   persistPdfAnnotations,
   persistSheetMeta,
+  persistTitle,
+  renameFolderPath,
   type VaultDb,
 } from "@/lib/db/vault-db";
 import { deleteBlob, writeBlob } from "@/lib/blob-store";
@@ -46,6 +50,11 @@ type Vault = {
   /** Explicit folder names (includes empty ones). null while loading. */
   folders: string[] | null;
   updateContent: (id: string, content: string) => void;
+  updateLinks: (id: string, links: string[]) => void;
+  renameItem: (id: string, title: string) => void;
+  renameFolder: (oldPath: string, newPath: string) => Promise<void>;
+  moveItem: (id: string, folder: string) => void;
+  moveFolder: (oldPath: string, newParent: string) => Promise<void>;
   updateSheetMeta: (id: string, meta: SheetMeta) => void;
   updatePdfAnnotations: (id: string, annotations: PdfAnnotation[]) => void;
   /** Returns the new item's id once it lands in local state. */
@@ -136,6 +145,100 @@ export function useVault(): Vault {
     const db = dbRef.current;
     if (db) void persistContent(db, id, content);
   }, []);
+
+  const updateLinks = useCallback((id: string, links: string[]) => {
+    setNotes((prev) =>
+      prev ? prev.map((n) => (n.id === id ? { ...n, links } : n)) : prev,
+    );
+    const db = dbRef.current;
+    if (db) void persistLinks(db, id, links);
+  }, []);
+
+  const renameItem = useCallback((id: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setNotes((prev) =>
+      prev
+        ? prev.map((n) => (n.id === id ? { ...n, title: trimmed } : n))
+        : prev,
+    );
+    const db = dbRef.current;
+    if (db) void persistTitle(db, id, trimmed);
+  }, []);
+
+  const renameFolder = useCallback(
+    async (oldPath: string, newPath: string): Promise<void> => {
+      if (oldPath === newPath || !newPath.trim()) return;
+      const target = newPath.trim();
+      const oldPrefix = `${oldPath}/`;
+      // Items inside the renamed folder (exact match or nested) get their
+      // `folder` rewritten to use the new prefix.
+      setNotes((prev) =>
+        prev
+          ? prev.map((n) => {
+              if (n.folder === oldPath) return { ...n, folder: target };
+              if (n.folder.startsWith(oldPrefix)) {
+                return {
+                  ...n,
+                  folder: target + n.folder.slice(oldPath.length),
+                };
+              }
+              return n;
+            })
+          : prev,
+      );
+      // Same logic on the folders list.
+      setFolders((prev) =>
+        prev
+          ? prev.map((name) => {
+              if (name === oldPath) return target;
+              if (name.startsWith(oldPrefix))
+                return target + name.slice(oldPath.length);
+              return name;
+            })
+          : prev,
+      );
+      const db = dbRef.current;
+      if (db) {
+        try {
+          await renameFolderPath(db, oldPath, target);
+        } catch (err) {
+          console.warn("[vault] renameFolderPath failed:", err);
+        }
+      }
+    },
+    [],
+  );
+
+  const moveItem = useCallback((id: string, folder: string) => {
+    setNotes((prev) =>
+      prev ? prev.map((n) => (n.id === id ? { ...n, folder } : n)) : prev,
+    );
+    const db = dbRef.current;
+    if (db) void persistItemFolder(db, id, folder);
+  }, []);
+
+  /**
+   * Move a folder into a new parent. The folder's last-segment name is
+   * preserved — only its prefix changes. Reuses renameFolderPath under the
+   * hood so all nested folders + items inside are updated atomically.
+   *
+   * Cycle prevention: dropping a folder onto itself or any descendant is a
+   * no-op (silent), since `oldPath` would prefix-match `newParent`.
+   */
+  const moveFolder = useCallback(
+    async (oldPath: string, newParent: string): Promise<void> => {
+      const lastSlash = oldPath.lastIndexOf("/");
+      const segment =
+        lastSlash >= 0 ? oldPath.slice(lastSlash + 1) : oldPath;
+      const newPath = newParent ? `${newParent}/${segment}` : segment;
+      if (newPath === oldPath) return;
+      // Block cycles: cannot move into self or descendant.
+      if (newParent === oldPath || newParent.startsWith(`${oldPath}/`)) return;
+      await renameFolder(oldPath, newPath);
+    },
+    [renameFolder],
+  );
 
   const updateSheetMeta = useCallback((id: string, meta: SheetMeta) => {
     setNotes((prev) =>
@@ -340,8 +443,13 @@ export function useVault(): Vault {
     notes,
     folders,
     updateContent,
+    updateLinks,
     updateSheetMeta,
     updatePdfAnnotations,
+    renameItem,
+    renameFolder,
+    moveItem,
+    moveFolder,
     createNote,
     createFolder,
     uploadFiles,

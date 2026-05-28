@@ -76,6 +76,11 @@ export function buildAccessibilityTree(): BuiltTree {
     const text = getDirectText(element);
     const state = getState(element);
     const rect = getRect(element);
+    // Resolve a visual source — first an explicit <img>/<source> src, then
+    // a CSS background-image URL (so divs styled with a hero background
+    // survive into the tree even when they have no other a11y signal).
+    const src = getImageSrc(element) ?? getBackgroundImageUrl(element, rect);
+    const href = getHref(element);
     const children: TreeNode[] = [];
 
     for (const child of Array.from(element.children)) {
@@ -90,7 +95,13 @@ export function buildAccessibilityTree(): BuiltTree {
     }
 
     const hasSignal =
-      role || name || text || Object.keys(state).length > 0 || children.length > 0;
+      role ||
+      name ||
+      text ||
+      Object.keys(state).length > 0 ||
+      children.length > 0 ||
+      src ||
+      href;
 
     if (!hasSignal) {
       return null;
@@ -104,9 +115,82 @@ export function buildAccessibilityTree(): BuiltTree {
       selector: getSelector(element),
       state,
       rect,
+      src: src ?? undefined,
+      href: href ?? undefined,
       children,
     });
   }
+}
+
+/**
+ * Extract an image's resolved source. `currentSrc` picks the right entry from
+ * srcset/picture; falls back to the bare `src` attr. Returns null for non-img
+ * elements so compactObject drops the field.
+ */
+function getImageSrc(element: Element): string | null {
+  const tag = element.tagName;
+  if (tag === "IMG") {
+    const img = element as HTMLImageElement;
+    return img.currentSrc || img.src || null;
+  }
+  if (tag === "SOURCE") {
+    const src = (element as HTMLSourceElement).src;
+    if (src) return src;
+    const srcset = element.getAttribute("srcset");
+    if (srcset) {
+      // First candidate from srcset, dropping the descriptor.
+      return srcset.split(",")[0]?.trim().split(/\s+/)[0] ?? null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Pick the first `url(...)` out of a computed `background-image` declaration.
+ * Background-image can be a gradient (skipped), can mix gradients and URLs
+ * ("url(a), linear-gradient(...)"), and the URL can be relative — we resolve
+ * against the page's location so the SW fetcher gets an absolute URL.
+ *
+ * `data:` URIs are skipped (they're already inline; encoding them again would
+ * waste bytes). Elements smaller than 16×16 are skipped — that filters out
+ * sprite-style 1×1 / icon backgrounds that are visual noise.
+ */
+function getBackgroundImageUrl(
+  element: Element,
+  rect: Rect | null,
+): string | null {
+  const tag = element.tagName;
+  if (tag === "IMG" || tag === "SOURCE") return null;
+  if (!rect || rect.width < 16 || rect.height < 16) return null;
+  let bg: string;
+  try {
+    bg = window.getComputedStyle(element as HTMLElement).backgroundImage;
+  } catch {
+    return null;
+  }
+  if (!bg || bg === "none") return null;
+  const match = /url\(['"]?([^'")]+)['"]?\)/i.exec(bg);
+  if (!match) return null;
+  const raw = match[1].trim();
+  if (!raw || raw.startsWith("data:")) return null;
+  try {
+    const absolute = new URL(raw, window.location.href).href;
+    return /^https?:/i.test(absolute) ? absolute : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Extract an href for link-like elements. */
+function getHref(element: Element): string | null {
+  if (element.tagName === "A" || element.tagName === "AREA") {
+    const href = (element as HTMLAnchorElement).href;
+    // Skip degenerate hrefs.
+    if (!href || href.startsWith("javascript:") || href === window.location.href + "#")
+      return null;
+    return href;
+  }
+  return null;
 }
 
 function inferRole(element: Element): string | null {

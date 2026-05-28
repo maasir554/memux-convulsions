@@ -21,7 +21,12 @@ import { eq, inArray, sql } from "drizzle-orm";
 
 import { insertFolder, insertItem, getVaultDb } from "@/lib/db/vault-db";
 import { writeBlob } from "@/lib/blob-store";
-import { folders, indexRuns, items } from "@/lib/db/schema";
+import {
+  folders,
+  indexRuns,
+  items,
+  type IndexerDomImage,
+} from "@/lib/db/schema";
 import type { Note } from "@/lib/mock-notes";
 
 const ROOT = "_Indexes";
@@ -241,6 +246,13 @@ export async function writeManifest(opts: {
     noteItemId: string;
   }>;
   conceptIndex: string[];
+  /** Optional DOM-image index appended at the bottom of the manifest. */
+  domImages?: Array<{
+    title: string;
+    alt: string;
+    src: string;
+    description?: string;
+  }>;
 }): Promise<string> {
   const db = await getVaultDb();
   const folder = indexFolderName(opts.groupName);
@@ -267,6 +279,19 @@ export async function writeManifest(opts: {
   if (opts.conceptIndex.length > 0) {
     lines.push("## Concept index", "");
     lines.push(opts.conceptIndex.map((c) => `\`${c}\``).join(" · "));
+  }
+  if (opts.domImages && opts.domImages.length > 0) {
+    lines.push("", "## Source images", "");
+    lines.push(
+      `${opts.domImages.length} image${opts.domImages.length === 1 ? "" : "s"} pulled from the captured page DOM.`,
+      "",
+    );
+    for (const img of opts.domImages) {
+      lines.push(`![${img.alt}](wikilink:${encodeURIComponent(img.title)})`);
+      if (img.description) {
+        lines.push("", `> ${img.description}`, "");
+      }
+    }
   }
   lines.push("", `*Indexed ${new Date().toISOString().slice(0, 16).replace("T", " ")} · ${opts.fileCount} file${opts.fileCount === 1 ? "" : "s"}*`);
 
@@ -343,6 +368,91 @@ export async function writeCropImage(opts: {
   };
   await insertItem(db, note);
   return { itemId: id, title };
+}
+
+/**
+ * Materialise the run's DOM-captured images as vault items under
+ * `_Indexes/<group>/images/`. Each becomes an `image`-type item titled
+ * `dom-N`, addressable from any section md via `![alt](wikilink:dom-N)`.
+ *
+ * Each image carries its agent-generated description as the item's
+ * `summary` AND as a small markdown body in `content` — so vault search
+ * (text + future vector) finds it, and the image's detail view shows the
+ * read-out next to the picture.
+ *
+ * Returns the list of created items so the manifest can index them.
+ */
+export async function materialiseDomImages(opts: {
+  groupName: string;
+  domImages: IndexerDomImage[];
+}): Promise<
+  Array<{
+    title: string;
+    alt: string;
+    src: string;
+    itemId: string;
+    description: string;
+    tags: string[];
+  }>
+> {
+  if (opts.domImages.length === 0) return [];
+  const db = await getVaultDb();
+  await insertFolder(db, ROOT);
+  await insertFolder(db, indexFolderName(opts.groupName));
+  await insertFolder(db, imagesFolderName(opts.groupName));
+
+  const out: Array<{
+    title: string;
+    alt: string;
+    src: string;
+    itemId: string;
+    description: string;
+    tags: string[];
+  }> = [];
+  for (let i = 0; i < opts.domImages.length; i++) {
+    const img = opts.domImages[i];
+    const title = `dom-${i + 1}`;
+    const id = `idx-domimg-${crypto.randomUUID()}`;
+    const description = img.description?.trim() || "";
+    const llmTags = Array.isArray(img.tags) ? img.tags.filter((t) => t.trim()) : [];
+    // Body: just the description in italics + a tiny source line. The
+    // image itself renders separately in the vault viewer.
+    const contentLines: string[] = [];
+    if (description) contentLines.push(`*${description}*`);
+    if (img.src) contentLines.push(`\n[Source](${img.src})`);
+    const note: Note = {
+      id,
+      title,
+      folder: imagesFolderName(opts.groupName),
+      type: "image",
+      summary: description || img.alt || "",
+      content: contentLines.join("\n"),
+      tags: Array.from(
+        new Set([
+          "indexed",
+          "dom-image",
+          ...(img.readerKind ? [img.readerKind] : []),
+          ...llmTags,
+        ]),
+      ),
+      updatedAt: new Date().toISOString().slice(0, 10),
+      blobKey: img.blobKey,
+    };
+    try {
+      await insertItem(db, note);
+      out.push({
+        title,
+        alt: img.alt || title,
+        src: img.src,
+        itemId: id,
+        description,
+        tags: llmTags,
+      });
+    } catch (err) {
+      console.warn(`[indexer] DOM image insert failed for ${title}:`, err);
+    }
+  }
+  return out;
 }
 
 /**

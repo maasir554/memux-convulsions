@@ -338,12 +338,16 @@ export function buildLinkGraph(items: Note[]): LinkGraph {
 
   for (const item of items) {
     const targets = new Set<string>();
+    // Markdown picks up wikilinks from its content AND any manually-added
+    // links in note.links (added via the right sidebar). Non-markdown items
+    // only use note.links since they have no markdown content to scan.
     if (item.type === "markdown") {
       for (const title of extractWikiLinkTitles(item.content)) {
         const targetId = idByTitle.get(title.toLowerCase());
         if (targetId && targetId !== item.id) targets.add(targetId);
       }
-    } else if (item.links) {
+    }
+    if (item.links) {
       for (const id of item.links) if (id !== item.id) targets.add(id);
     }
     for (const targetId of targets) {

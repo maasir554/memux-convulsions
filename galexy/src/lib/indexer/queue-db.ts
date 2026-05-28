@@ -4,6 +4,7 @@ import { getVaultDb } from "@/lib/db/vault-db";
 import {
   indexRuns,
   type DbIndexRun,
+  type IndexerDomImage,
   type IndexerFileRef,
   type RunStatus,
 } from "@/lib/db/schema";
@@ -18,6 +19,10 @@ export type Group = {
   groupName: string;
   prompt: string;
   files: IndexerFileRef[];
+  /** Images extracted from the captured page's DOM; materialised at finalise time. */
+  domImages: IndexerDomImage[];
+  /** Pruned a11y tree from a worksmith capture (used for link enrichment). */
+  prunedTree: unknown | null;
   scratchpadMd: string;
   folderName: string | null;
   error: string | null;
@@ -36,6 +41,8 @@ function rowToGroup(row: DbIndexRun): Group {
     groupName: row.groupName,
     prompt: row.prompt,
     files: row.files,
+    domImages: row.domImages ?? [],
+    prunedTree: row.prunedTree ?? null,
     scratchpadMd: row.scratchpadMd,
     folderName: row.folderName ?? null,
     error: row.error ?? null,
@@ -137,6 +144,28 @@ export async function attachFiles(id: string, files: File[]): Promise<void> {
   await db.update(indexRuns).set({ files: next }).where(eq(indexRuns.id, id));
 }
 
+/**
+ * Stash DOM images on a draft group. Called by the worksmith bridge after it
+ * decodes the inbound capture's data URIs and writes the bytes to OPFS. The
+ * orchestrator materialises them as vault items at finalise time.
+ */
+export async function setDomImages(
+  id: string,
+  domImages: IndexerDomImage[],
+): Promise<void> {
+  const db = await getVaultDb();
+  await db.update(indexRuns).set({ domImages }).where(eq(indexRuns.id, id));
+}
+
+/** Stash a pruned a11y tree on a draft group (worksmith bridge). */
+export async function setPrunedTree(
+  id: string,
+  prunedTree: unknown,
+): Promise<void> {
+  const db = await getVaultDb();
+  await db.update(indexRuns).set({ prunedTree }).where(eq(indexRuns.id, id));
+}
+
 /** Remove a single file from a draft group and delete its OPFS blob. */
 export async function removeFile(id: string, fileRefId: string): Promise<void> {
   const db = await getVaultDb();
@@ -155,26 +184,31 @@ export async function removeFile(id: string, fileRefId: string): Promise<void> {
   }
 }
 
-/** Delete a group entirely. Refuses if it's running. */
+/**
+ * Delete a group entirely. Forceful — allowed in any status, including a
+ * mid-run state. Callers cancelling a live run should first call
+ * `cancelRun(id)` from the runs-registry so the orchestrator's fetches
+ * abort cleanly before the row is removed.
+ */
 export async function deleteGroup(id: string): Promise<void> {
   const db = await getVaultDb();
   const [row] = await db.select().from(indexRuns).where(eq(indexRuns.id, id));
   if (!row) return;
-  if (
-    row.status !== "draft" &&
-    row.status !== "queued" &&
-    row.status !== "done" &&
-    row.status !== "failed" &&
-    row.status !== "cancelled"
-  ) {
-    throw new Error(`Cannot delete group while ${row.status}`);
-  }
   for (const f of row.files) {
     if (!f.blobKey) continue;
     try {
       await deleteBlob(f.blobKey);
     } catch (err) {
       console.warn("[queue] OPFS delete failed:", err);
+    }
+  }
+  // Also clean up any DOM-image blobs the bridge stashed on this run.
+  for (const img of row.domImages ?? []) {
+    if (!img.blobKey) continue;
+    try {
+      await deleteBlob(img.blobKey);
+    } catch (err) {
+      console.warn("[queue] DOM image OPFS delete failed:", err);
     }
   }
   await db.delete(indexRuns).where(eq(indexRuns.id, id));

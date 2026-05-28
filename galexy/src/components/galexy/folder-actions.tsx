@@ -15,6 +15,7 @@ import {
   FileUp,
   ImageUp,
   MoreHorizontal,
+  Pencil,
   Plus,
   Sheet,
   SquareCode,
@@ -131,6 +132,8 @@ type Handlers = {
   onUpload: (category: UploadCategory, folder: string, files: File[]) => void;
   /** Optional — when present, a Delete entry is appended to the folder menus. */
   onDeleteFolder?: (folder: string) => void;
+  /** Optional — when present, a Rename entry is shown. */
+  onRenameFolder?: (folder: string) => void;
 };
 
 function runAction(action: FolderAction, h: Handlers) {
@@ -152,6 +155,7 @@ export function FolderActionsPopover({
   onStartCreate,
   onUpload,
   onDeleteFolder,
+  onRenameFolder,
 }: PopoverProps) {
   const [open, setOpen] = useState(false);
 
@@ -183,7 +187,7 @@ export function FolderActionsPopover({
           onCloseAutoFocus={(e) => e.preventDefault()}
         >
           <SearchableActions
-            handlers={{ folder, onStartCreate, onUpload, onDeleteFolder }}
+            handlers={{ folder, onStartCreate, onUpload, onDeleteFolder, onRenameFolder }}
             onClose={() => setOpen(false)}
           />
         </PopoverPrimitive.Content>
@@ -214,8 +218,11 @@ function SearchableActions({
     return ALL_ACTIONS.filter((a) => a.label.toLowerCase().includes(q));
   }, [query]);
 
-  // Delete is appended as a separate, distinct row — never part of the
-  // create/upload list and never first-Enter to avoid accidental deletes.
+  // Rename + Delete sit in a separate trailing group, never on the Enter
+  // path (which would risk accidental destructive or surprising actions).
+  const renameVisible =
+    !!handlers.onRenameFolder &&
+    (!query.trim() || "rename folder".includes(query.trim().toLowerCase()));
   const deleteVisible =
     !!handlers.onDeleteFolder &&
     (!query.trim() || "delete folder".includes(query.trim().toLowerCase()));
@@ -251,7 +258,7 @@ function SearchableActions({
         className="mx-1 rounded border bg-background px-2 py-1 text-sm outline-none focus:border-ring"
       />
       <div className="flex max-h-72 flex-col gap-0.5 overflow-y-auto pt-1">
-        {filtered.length === 0 && !deleteVisible ? (
+        {filtered.length === 0 && !renameVisible && !deleteVisible ? (
           <p className="px-2 py-2 text-center text-xs text-muted-foreground">
             No matching actions.
           </p>
@@ -268,21 +275,34 @@ function SearchableActions({
             </button>
           ))
         )}
+        {(renameVisible || deleteVisible) && (
+          <div className="my-1 border-t" />
+        )}
+        {renameVisible && (
+          <button
+            type="button"
+            onClick={() => {
+              handlers.onRenameFolder?.(handlers.folder);
+              onClose();
+            }}
+            className="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-sidebar-accent"
+          >
+            <Pencil className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">Rename folder</span>
+          </button>
+        )}
         {deleteVisible && (
-          <>
-            <div className="my-1 border-t" />
-            <button
-              type="button"
-              onClick={() => {
-                handlers.onDeleteFolder?.(handlers.folder);
-                onClose();
-              }}
-              className="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
-            >
-              <Trash2 className="size-4 shrink-0" />
-              <span className="truncate">Delete folder</span>
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => {
+              handlers.onDeleteFolder?.(handlers.folder);
+              onClose();
+            }}
+            className="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="size-4 shrink-0" />
+            <span className="truncate">Delete folder</span>
+          </button>
         )}
       </div>
     </div>
@@ -301,6 +321,7 @@ export function FolderContextMenu({
   onStartCreate,
   onUpload,
   onDeleteFolder,
+  onRenameFolder,
   children,
 }: Handlers & { children: ReactNode }) {
   const handlers: Handlers = {
@@ -308,6 +329,7 @@ export function FolderContextMenu({
     onStartCreate,
     onUpload,
     onDeleteFolder,
+    onRenameFolder,
   };
 
   return (
@@ -381,17 +403,26 @@ export function FolderContextMenu({
             </ContextMenuPrimitive.Portal>
           </ContextMenuPrimitive.Sub>
 
+          {(onRenameFolder || onDeleteFolder) && (
+            <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
+          )}
+          {onRenameFolder && (
+            <ContextMenuPrimitive.Item
+              className={itemClass}
+              onSelect={() => onRenameFolder(folder)}
+            >
+              <Pencil className="size-4 text-muted-foreground" />
+              Rename folder
+            </ContextMenuPrimitive.Item>
+          )}
           {onDeleteFolder && (
-            <>
-              <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
-              <ContextMenuPrimitive.Item
-                className={cn(itemClass, "text-destructive")}
-                onSelect={() => onDeleteFolder(folder)}
-              >
-                <Trash2 className="size-4" />
-                Delete folder
-              </ContextMenuPrimitive.Item>
-            </>
+            <ContextMenuPrimitive.Item
+              className={cn(itemClass, "text-destructive")}
+              onSelect={() => onDeleteFolder(folder)}
+            >
+              <Trash2 className="size-4" />
+              Delete folder
+            </ContextMenuPrimitive.Item>
           )}
         </ContextMenuPrimitive.Content>
       </ContextMenuPrimitive.Portal>
@@ -404,6 +435,7 @@ export function FolderContextMenu({
 type ItemHandlers = {
   itemId: string;
   itemTitle: string;
+  onRename: (id: string) => void;
   onDelete: (id: string) => void;
 };
 
@@ -411,6 +443,7 @@ type ItemHandlers = {
 export function ItemActionsPopover({
   itemId,
   itemTitle,
+  onRename,
   onDelete,
 }: ItemHandlers) {
   const [open, setOpen] = useState(false);
@@ -442,6 +475,18 @@ export function ItemActionsPopover({
           <button
             type="button"
             onClick={() => {
+              onRename(itemId);
+              setOpen(false);
+            }}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-sidebar-accent"
+          >
+            <Pencil className="size-4 text-muted-foreground" />
+            Rename
+          </button>
+          <div className="my-1 border-t" />
+          <button
+            type="button"
+            onClick={() => {
               onDelete(itemId);
               setOpen(false);
             }}
@@ -459,6 +504,7 @@ export function ItemActionsPopover({
 /** Right-click context menu for non-folder items (mirrors the popover). */
 export function ItemContextMenu({
   itemId,
+  onRename,
   onDelete,
   children,
 }: Omit<ItemHandlers, "itemTitle"> & { children: ReactNode }) {
@@ -469,6 +515,14 @@ export function ItemContextMenu({
       </ContextMenuPrimitive.Trigger>
       <ContextMenuPrimitive.Portal>
         <ContextMenuPrimitive.Content className={subContentClass}>
+          <ContextMenuPrimitive.Item
+            className={itemClass}
+            onSelect={() => onRename(itemId)}
+          >
+            <Pencil className="size-4 text-muted-foreground" />
+            Rename
+          </ContextMenuPrimitive.Item>
+          <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
           <ContextMenuPrimitive.Item
             className={cn(itemClass, "text-destructive")}
             onSelect={() => onDelete(itemId)}

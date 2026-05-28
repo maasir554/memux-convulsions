@@ -20,6 +20,10 @@ export interface TreeNode {
   selector?: string;
   state?: TreeNodeState;
   rect?: Rect | null;
+  /** Resolved <img>/<source>/<picture> src (currentSrc when available). */
+  src?: string;
+  /** Resolved <a>/<area> href (skipped for javascript: / empty fragments). */
+  href?: string;
   children?: TreeNode[];
 }
 
@@ -110,6 +114,26 @@ export interface TabState {
 
 export type CaptureKind = "stable" | "snap" | "full";
 
+/**
+ * A single image extracted from the captured page's DOM. The bytes are
+ * fetched in the background service worker so cross-origin images that the
+ * page itself couldn't have read via canvas are still captured cleanly.
+ */
+export interface DomImage {
+  /** Original source URL the page loaded. */
+  src: string;
+  alt?: string;
+  /** Data URI ("data:image/png;base64,...") — already encoded for transport. */
+  dataUri?: string;
+  /** Mime type as reported by the fetch response. */
+  mimeType?: string;
+  /** Natural pixel size when reported by the source <img> via getBoundingClientRect / naturalWidth. */
+  width?: number;
+  height?: number;
+  /** Set when the background fetch couldn't get the bytes (CORS, 404, etc.). */
+  error?: string;
+}
+
 export interface SavedCapture {
   id: string;
   kind: CaptureKind;
@@ -133,6 +157,11 @@ export interface SavedCapture {
   viewport?: { width: number; height: number };
   /** Document total height for full-capture context. */
   documentHeight?: number;
+  /**
+   * Images extracted from the page DOM and fetched by the background SW so
+   * the cross-origin bytes survive. Populated for user (snap/full) captures.
+   */
+  domImages?: DomImage[];
   /**
    * True once this capture has been ack'd by an open galexy/memux tab. Only
    * meaningful on user captures — auto (stable) captures stay local.

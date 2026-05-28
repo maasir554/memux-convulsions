@@ -76,7 +76,11 @@ export function TabStrip({ tabs, activeId, onActivate, onClose }: TabStripProps)
                 onClick={() => onActivate(tab.id)}
                 className="flex items-center gap-2 py-2"
               >
-                <ItemIcon type={tab.type} className="size-3.5" />
+                <ItemIcon
+                  type={tab.type}
+                  language={tab.language}
+                  className="size-3.5"
+                />
                 <span className="max-w-40 truncate">{tab.title}</span>
               </button>
               <button

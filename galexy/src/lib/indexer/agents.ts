@@ -30,6 +30,12 @@ export type VisionerInput = {
   pageOrdinal: number;
   /** Filename so the agent has hint of provenance. */
   fileName: string;
+  /**
+   * Hierarchical text outline of the captured document derived from the
+   * accessibility tree. Provided once per run; not page-specific. Used as
+   * an anchor for topic-transition decisions — see VISIONER_SYSTEM.
+   */
+  documentOutline?: string;
 };
 
 export type Diagram = {
@@ -82,15 +88,25 @@ Rules:
 - Do NOT include the page number or "page N" headers in 'text'. The orchestrator handles structural framing.
 - Tables: render as markdown tables.
 - Equations: use $...$ / $$...$$ if present.
-- Footnotes: inline as (note: ...) or attach to the running line — never invent footnote anchors.`;
+- Footnotes: inline as (note: ...) or attach to the running line — never invent footnote anchors.
+
+Document outline rules — only apply when a "Document outline" is included in the prompt:
+- The outline is a hierarchical TOC of the WHOLE captured page; you only see one viewport at a time. Use it to anchor your decisions, not to invent.
+- Your 'topic' field should match an outline entry verbatim when that heading is visibly present on this page.
+- 'transition' = "new" ONLY when the page visibly contains a heading that matches the next outline entry after the current sessionState topic.
+- 'transition' = "continue" when you don't see any outline-matching heading break and the content is a mid-flow extension of the previous page.
+- Do NOT emit content that quotes outline entries you cannot see on this page. The outline is for orientation only — the model of record is still the image you're reading.`;
 
 export async function visioner(
   input: VisionerInput,
   signal: AbortSignal,
 ): Promise<VisionerOutput> {
+  const outlineBlock = input.documentOutline
+    ? `\nDOCUMENT OUTLINE (whole page, for anchoring topic decisions — see system rules):\n${input.documentOutline}\n`
+    : "";
   const prompt = `File: ${input.fileName}
 Page: ${input.pageOrdinal}
-
+${outlineBlock}
 USER CONTEXT (may be empty):
 ${input.userContext || "(none)"}
 
@@ -166,6 +182,86 @@ Produce the index entry.`;
       system: SUMMARISER_SYSTEM,
       schema: SUMMARISER_SCHEMA,
       temperature: 0.3,
+      think: false,
+    },
+    signal,
+  );
+}
+
+/* ------------------------------------------------------ image-reader */
+
+export type ImageReaderInput = {
+  imageBase64: string;
+  mimeType: string;
+  /** Original page URL the image was loaded from. */
+  src: string;
+  /** Alt attribute as the page reported it (may be empty). */
+  alt: string;
+  /**
+   * Compact text block from `formatImageContext` — heading + container role
+   * + neighbouring text + link target — so the agent can interpret what
+   * the image MEANS on the page, not just what it depicts.
+   */
+  context: string;
+  /** User's group-level context (may be empty). */
+  userContext: string;
+};
+
+export type ImageReaderOutput = {
+  /** 1-3 sentences. What the image shows + why it matters on this page. */
+  description: string;
+  /** 2-6 short noun-phrase tags. Concrete subjects, not generic ("ui"). */
+  tags: string[];
+  /**
+   *  decorative  — bullets, separators, background flourishes (still saved
+   *                so the layout context is preserved, but flagged).
+   *  ui          — icon, button, logo, navigation chrome.
+   *  content     — photo, illustration, chart, diagram, screenshot.
+   */
+  kind: "decorative" | "ui" | "content";
+};
+
+const IMAGE_READER_SCHEMA = `{
+  description: string,            // 1-3 sentences explaining what the image shows AND its purpose on the page
+  tags: string[],                 // 2-6 short noun-phrase tags. Concrete subjects, not generic ("ui", "image").
+  kind: "decorative" | "ui" | "content"
+}`;
+
+const IMAGE_READER_SYSTEM = `You are the Image Reader. You receive ONE image extracted from a web page DOM plus structural context (the nearest heading, container role, alt text, surrounding text, link target).
+
+Your job: produce a faithful description that says what the image actually depicts AND interprets its role on the page using the context.
+
+Rules:
+- description: 1-3 sentences. Concrete. Lead with what's visually in the frame; if the context tells you what the image represents on the page (logo for X, hero illustration for Y, screenshot of Z UI), include that.
+- Never invent text. If the image contains legible text, you may transcribe short labels verbatim. Don't make up brand names or quotes you can't see.
+- Don't editorialise ("a stunning image of..."). Plain factual prose.
+- tags: short noun phrases. Concrete subjects (e.g. "Tesla Model Y", "bar chart", "iPhone mockup"). Avoid generic terms ("image", "ui", "screenshot") — those are captured by the 'kind' field.
+- kind:
+  * "decorative" — the image is purely a visual flourish (separator, background pattern, decorative emoji). NOT a logo (those are "ui").
+  * "ui" — chrome of the page: logos, button icons, navigation symbols, social-media glyphs.
+  * "content" — the image is the actual content of the section (photo, chart, illustration, screenshot, diagram).`;
+
+export async function imageReader(
+  input: ImageReaderInput,
+  signal: AbortSignal,
+): Promise<ImageReaderOutput> {
+  const prompt = `Source URL: ${input.src}
+Reported alt: ${input.alt || "(empty)"}
+
+CONTEXT FROM SURROUNDING DOM:
+${input.context || "(none — image had no useful neighbours)"}
+
+USER CONTEXT (may be empty):
+${input.userContext || "(none)"}
+
+Describe the attached image and classify it.`;
+  return jsonCall<ImageReaderOutput>(
+    {
+      prompt,
+      image: { base64: input.imageBase64, mimeType: input.mimeType },
+      system: IMAGE_READER_SYSTEM,
+      schema: IMAGE_READER_SCHEMA,
+      temperature: 0.2,
       think: false,
     },
     signal,

@@ -274,11 +274,14 @@
  * The band is a translucent gradient swept top-to-bottom; the glow cycles
  * cyan ↔ purple. Both pause when phase=done/failed (class .ai-still).
  * ========================================================================== */
-/* Smooth full cycle: top → bottom → top → bottom … with ease-in-out
-   reversals so the band gently decelerates and reverses at each edge. */
+/* Smooth full cycle: band travels from fully above the container to fully
+   below it, then back, with ease-in-out reversals. translateY is in the
+   band's own height (36% of container), so a 280% translate lands the band
+   ~100% of container-height below its start — its bottom edge has just
+   crossed the container's bottom. */
 @keyframes ai-scan-sweep {
-  0%, 100% { transform: translateY(-110%); }
-  50%      { transform: translateY(110%); }
+  0%, 100% { transform: translateY(-120%); }
+  50%      { transform: translateY(280%); }
 }
 @keyframes ai-glow-cycle {
   0%, 100% {
@@ -307,7 +310,7 @@
   );
   mix-blend-mode: screen;
   filter: blur(10px);
-  animation: ai-scan-sweep 5s ease-in-out infinite;
+  animation: ai-scan-sweep 7s ease-in-out infinite;
   will-change: transform;
 }
 .ai-glow {
@@ -349,4 +352,35 @@
   -webkit-background-clip: text;
   color: transparent !important;
   animation: ai-text-shimmer 2.4s linear infinite;
+}
+
+/* ============================================================================
+ * Indexer queue sidebar — running indicator + animated "Indexing…" label.
+ * ========================================================================== */
+
+/* A small green dot that pulses outward via box-shadow. Marks a live run in
+   the queue sidebar; can be reused anywhere we want "this is alive". */
+@keyframes ws-ripple-pulse {
+  0%   { box-shadow: 0 0 0 0   color-mix(in oklch, oklch(0.7 0.16 150) 70%, transparent); }
+  70%  { box-shadow: 0 0 0 7px color-mix(in oklch, oklch(0.7 0.16 150) 0%,  transparent); }
+  100% { box-shadow: 0 0 0 0   color-mix(in oklch, oklch(0.7 0.16 150) 0%,  transparent); }
+}
+.ws-ripple-dot {
+  background: oklch(0.74 0.16 150);
+  animation: ws-ripple-pulse 1.6s ease-out infinite;
+}
+
+/* "Indexing." → "Indexing.." → "Indexing..." → "Indexing" cycle via width
+   on a fixed-content "..." span. steps(4, jump-none) gives 4 discrete states
+   (0, 1ch, 2ch, 3ch) over the cycle. */
+@keyframes ws-indexing-dots {
+  0%   { width: 0ch; }
+  100% { width: 3ch; }
+}
+.ws-indexing-dots {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  width: 3ch;
+  animation: ws-indexing-dots 1.6s steps(4, jump-none) infinite;
 }

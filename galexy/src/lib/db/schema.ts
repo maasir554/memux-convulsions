@@ -112,6 +112,31 @@ export type IndexerFileRef = {
   blobKey?: string | null;
 };
 
+/**
+ * An image extracted from the captured page's DOM. Stored as a vault item by
+ * the orchestrator's finalising phase, so the section md / manifest can
+ * reference it via `wikilink:dom-N`.
+ */
+export type IndexerDomImage = {
+  /** Original page URL the image was loaded from. */
+  src: string;
+  alt?: string;
+  /** OPFS blob_key where the fetched bytes live. */
+  blobKey: string;
+  mimeType: string;
+  width?: number;
+  height?: number;
+  /**
+   * Image-reader agent output, populated at finalise. Stored back on the
+   * group so re-rendering the manifest or re-embedding can re-use the
+   * agent's read without burning another LLM call.
+   */
+  description?: string;
+  tags?: string[];
+  /** "decorative" images get filtered out before this even gets set. */
+  readerKind?: "ui" | "content";
+};
+
 export const indexRuns = pgTable("index_runs", {
   id: text("id").primaryKey(),
   /** Position in the queue (lower = earlier). Set to NULL once status moves past `queued`. */
@@ -123,6 +148,23 @@ export const indexRuns = pgTable("index_runs", {
   prompt: text("prompt").notNull().default(""),
   /** Files attached to this group. */
   files: jsonb("files").$type<IndexerFileRef[]>().notNull().default([]),
+  /**
+   * Images extracted from the captured page's DOM (when this group came from
+   * a worksmith capture). Materialised as vault items during finalising so
+   * they become wikilink-addressable inside the section md / manifest.
+   */
+  domImages: jsonb("dom_images")
+    .$type<IndexerDomImage[]>()
+    .notNull()
+    .default([]),
+  /**
+   * Pruned accessibility tree from a worksmith capture, when present. The
+   * orchestrator walks it for {text → href} link enrichment + emits the
+   * node count to live-progress so the UI can show "Read tree (N nodes)".
+   * Shape mirrors the extension's `TreeNode`; stored as unknown jsonb here
+   * so we don't have to mirror the type across packages.
+   */
+  prunedTree: jsonb("pruned_tree").$type<unknown>(),
   /** Live agent notepad. Markdown. */
   scratchpadMd: text("scratchpad_md").notNull().default(""),
   /** The _Indexes/<group>/ folder name once materialised. */
@@ -298,6 +340,15 @@ export const INDEXER_DDL: readonly string[] = [
   SECTIONS_CREATE,
   INDEX_CHUNKS_CREATE,
   CONCEPTS_CREATE,
+];
+
+/**
+ * Forward-compatible column adds for the indexer tables. Each is idempotent
+ * (IF NOT EXISTS) so a running DB picks them up on next boot.
+ */
+export const INDEXER_MIGRATIONS: readonly string[] = [
+  `ALTER TABLE index_runs ADD COLUMN IF NOT EXISTS dom_images jsonb NOT NULL DEFAULT '[]'::jsonb;`,
+  `ALTER TABLE index_runs ADD COLUMN IF NOT EXISTS pruned_tree jsonb;`,
 ];
 
 export type DbSection = typeof sections.$inferSelect;

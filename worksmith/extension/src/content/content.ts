@@ -70,6 +70,38 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "worksmith.ring.show") {
+    // `create: true` is the explicit start-of-run signal from runUserCapture.
+    // Without it we only RESTORE an existing ring (un-hide it post-shot) —
+    // we never spawn one. This prevents a stray `ring.show` from creating
+    // an orphan ring on a tab the user never interacted with.
+    showRing({ create: message.create === true });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message?.type === "worksmith.ring.hide") {
+    // Hide the ring before captureVisibleTab fires. Using `display: none`
+    // (instead of opacity:0) removes the element from the rendering tree
+    // entirely — the compositor has nothing to paint. We then wait two
+    // animation frames + a small extra delay before ack'ing the
+    // background, because captureVisibleTab can otherwise pick up a frame
+    // that was composited before our hide reached the GPU.
+    hideRing();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setTimeout(() => sendResponse({ ok: true }), 40);
+      });
+    });
+    return true; // async response
+  }
+
+  if (message?.type === "worksmith.ring.dismiss") {
+    dismissRing();
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (message?.type === "worksmith.scrollStep") {
     const by = typeof message.by === "number" ? message.by : 0;
     const to = typeof message.to === "number" ? message.to : null;
@@ -127,6 +159,121 @@ function showFlash(): void {
   el.id = "__worksmith_flash__";
   document.documentElement.appendChild(el);
   setTimeout(() => el.remove(), 1200);
+}
+
+/* ============================================================================
+ * Persistent capture ring — shown for the whole duration of a snap/full
+ * capture and hidden momentarily for each captureVisibleTab call so the ring
+ * itself isn't baked into the screenshots.
+ *
+ * Visual: a slow-rotating conic gradient (pink → orange → yellow → orange →
+ * pink), masked with a radial fade so the centre is fully transparent and
+ * the edges carry the brand colour. The mask gives the user a clear "outer
+ * frame" feel without obscuring the page content.
+ * ========================================================================== */
+
+function ensureRingStyles(): void {
+  if (document.getElementById("__worksmith_ring_kf__")) return;
+  const style = document.createElement("style");
+  style.id = "__worksmith_ring_kf__";
+  style.textContent = `
+    @property --ws-ring-angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+    #__worksmith_ring__ {
+      position: fixed; inset: 0; pointer-events: none;
+      z-index: 2147483647;
+      /* Asymmetric conic with a tight bright "peak" near 160° so the
+         orbit reads as a moving comet, not just a colour wheel. The peak
+         is the single most-visible motion cue at a glance. */
+      background: conic-gradient(from var(--ws-ring-angle, 0deg),
+        #f472b6 0deg,
+        #fb923c 80deg,
+        #fde047 140deg,
+        #ffffff 162deg,
+        #fde047 184deg,
+        #d946ef 280deg,
+        #f472b6 360deg);
+      /* Crossing linear gradients masked to a narrow band along each edge
+         of the viewport. Each axis is fully opaque at the edge (0px) and
+         fully transparent by 80px inward — so the actual "ring" is only
+         the outer ~80px on every side, fading from full colour at the
+         edge to nothing as you move toward centre. Centre stays
+         completely clear instead of being half-lit by a 50%-stop gradient.
+         Pixel-based stops keep the band a uniform thickness regardless of
+         viewport aspect ratio (a 50% stop on a wide screen had the
+         horizontal fade reach much further than the vertical). */
+      -webkit-mask:
+        linear-gradient(to right,
+          black 0,
+          transparent 80px,
+          transparent calc(100% - 80px),
+          black 100%),
+        linear-gradient(to bottom,
+          black 0,
+          transparent 80px,
+          transparent calc(100% - 80px),
+          black 100%);
+              mask:
+        linear-gradient(to right,
+          black 0,
+          transparent 80px,
+          transparent calc(100% - 80px),
+          black 100%),
+        linear-gradient(to bottom,
+          black 0,
+          transparent 80px,
+          transparent calc(100% - 80px),
+          black 100%);
+      filter: blur(2px) saturate(140%) brightness(120%);
+      opacity: 0;
+      transition: opacity 220ms ease-out;
+      /* 3s/360° — fast enough that the peak's position is clearly
+         changing every blink, slow enough to feel calm rather than frantic. */
+      animation: ws-ring-rotate 3s linear infinite;
+      will-change: opacity, --ws-ring-angle;
+    }
+    #__worksmith_ring__.__ws-on__ { opacity: 1; }
+    @keyframes ws-ring-rotate { to { --ws-ring-angle: 360deg; } }
+  `;
+  document.documentElement.appendChild(style);
+}
+
+function showRing({ create }: { create: boolean }): void {
+  let el = document.getElementById("__worksmith_ring__");
+  if (!el) {
+    // Restore-only calls do nothing if there's no ring to restore. The
+    // background sends `ring.show` after each capture as a fire-and-forget;
+    // those should NOT spawn a ring on a tab where no run is active.
+    if (!create) return;
+    ensureRingStyles();
+    el = document.createElement("div");
+    el.id = "__worksmith_ring__";
+    document.documentElement.appendChild(el);
+    // Force a frame so the opacity transition fires from 0 → 1.
+    requestAnimationFrame(() => {
+      el!.classList.add("__ws-on__");
+    });
+    return;
+  }
+  // Coming back from a previous hide — strip display:none + (re-)apply the
+  // active class. The transition CSS handles the fade back in.
+  el.style.display = "";
+  el.classList.add("__ws-on__");
+}
+
+function hideRing(): void {
+  const el = document.getElementById("__worksmith_ring__");
+  if (!el) return;
+  // `display: none` removes the element from rendering entirely — the
+  // compositor has nothing to paint, so the captureVisibleTab snapshot
+  // can't possibly include the ring. Going to opacity:0 wasn't enough:
+  // the GPU can still composite the previous frame for a few ms after the
+  // style change, and chrome.tabs.captureVisibleTab sometimes picked
+  // exactly that frame.
+  el.style.display = "none";
+}
+
+function dismissRing(): void {
+  document.getElementById("__worksmith_ring__")?.remove();
 }
 
 document.addEventListener(

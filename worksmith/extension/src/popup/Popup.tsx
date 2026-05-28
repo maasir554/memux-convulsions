@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AudioLines, Camera, ExternalLink, X } from "lucide-react";
+import { Aperture, AudioLines, ExternalLink, Layers, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MemuxMark } from "@/lib/memux-mark";
 
@@ -208,23 +208,68 @@ export function Popup() {
           </div>
         )}
 
+        {/* Hidden gradient def — referenced by the primary button's icon
+            stroke. Five stops for a smoother perceptual transition than the
+            default linear RGB interpolation SVG would otherwise apply. */}
+        <svg width="0" height="0" aria-hidden="true" className="absolute">
+          <defs>
+            <linearGradient id="memux-btn-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#f9c2dc" />
+              <stop offset="28%" stopColor="#fcc7c1" />
+              <stop offset="55%" stopColor="#fdcfa3" />
+              <stop offset="80%" stopColor="#fddfa3" />
+              <stop offset="100%" stopColor="#fde7a4" />
+            </linearGradient>
+          </defs>
+        </svg>
+
         {/* actions */}
         <div className="flex flex-col gap-2">
+          {/* Primary — dark fill, gradient border + gradient text/icon.
+              `backgroundImage` does two stacked gradients: the first is a
+              solid card fill clipped to the padding-box, the second is the
+              real linear gradient clipped to the border-box — that's the
+              canonical CSS technique for a gradient stroke around a
+              rounded button. OKLCH interpolation smooths the colour
+              transition so the band doesn't read as banded. */}
           <button
             type="button"
             disabled={busy || !inspectable}
             onClick={() => triggerCapture("full")}
-            className="flex h-10 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#f472b6] via-[#fb923c] to-[#fde047] px-5 text-[13px] font-semibold text-black shadow-[0_8px_20px_-10px_rgba(244,114,182,0.45)] transition hover:brightness-110 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+            className="flex h-11 items-center justify-center gap-2 rounded-full px-5 text-[13.5px] font-bold transition active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+            style={{
+              border: "1.5px solid transparent",
+              backgroundImage:
+                "linear-gradient(oklch(0.205 0 0), oklch(0.205 0 0)), linear-gradient(90deg in oklch, #f9c2dc, #fdcfa3 50%, #fde7a4)",
+              backgroundOrigin: "border-box",
+              backgroundClip: "padding-box, border-box",
+              boxShadow:
+                "0 12px 28px -14px rgba(249, 194, 220, 0.35)",
+            }}
           >
-            <Camera className="size-4" />
-            Full capture
+            <Layers
+              className="size-[18px]"
+              style={{ stroke: "url(#memux-btn-grad)" }}
+              strokeWidth={2.4}
+            />
+            <span
+              className="bg-clip-text text-transparent"
+              style={{
+                backgroundImage:
+                  "linear-gradient(90deg in oklch, #f9c2dc, #fdcfa3 50%, #fde7a4)",
+              }}
+            >
+              Full capture
+            </span>
           </button>
+          {/* Secondary — clean white sheet, single-shot iris icon. */}
           <button
             type="button"
             disabled={busy || !inspectable}
             onClick={() => triggerCapture("snap")}
-            className="flex h-9 items-center justify-center gap-2 rounded-full bg-white px-5 text-[13px] font-medium text-black transition hover:brightness-95 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+            className="flex h-10 items-center justify-center gap-2 rounded-full bg-white px-5 text-[13.5px] font-bold text-black transition hover:brightness-95 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
           >
+            <Aperture className="size-[18px]" strokeWidth={2.2} />
             Capture snap
           </button>
         </div>
@@ -245,6 +290,47 @@ export function Popup() {
           </span>
         </div>
       </div>
+
+      {/* Bottom brand bar — thick gradient strip with fractal-noise dusting,
+          flush with the popup's bottom edge. Same colour stops + interpolation
+          as the primary button so the whole popup terminates on the brand. */}
+      <BottomBar />
+    </div>
+  );
+}
+
+function BottomBar() {
+  return (
+    <div
+      aria-hidden="true"
+      className="h-[12px] w-full shrink-0"
+      style={{
+        background:
+          "linear-gradient(90deg in oklch, #f472b6, #fb923c 50%, #fcd34d)",
+      }}
+    >
+      {/* Fractal-noise overlay on top of the gradient. Higher alpha than the
+          earlier pastel version so the texture reads as a real grain. */}
+      <svg
+        width="100%"
+        height="100%"
+        preserveAspectRatio="none"
+        viewBox="0 0 100 12"
+        className="block"
+      >
+        <defs>
+          <filter id="memux-bottom-bar-noise">
+            <feTurbulence
+              type="fractalNoise"
+              baseFrequency="3.4"
+              numOctaves="3"
+              seed="11"
+            />
+            <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.42 0" />
+          </filter>
+        </defs>
+        <rect width="100" height="12" filter="url(#memux-bottom-bar-noise)" />
+      </svg>
     </div>
   );
 }
