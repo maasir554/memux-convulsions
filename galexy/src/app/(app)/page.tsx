@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FilePlus, MessageSquare, FolderOpen } from "lucide-react";
+import { FilePlus, MessageSquare, FolderOpen, Users } from "lucide-react";
 
 import { AccountChip } from "@/components/auth/account-chip";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,13 @@ const TILES = [
     Icon: FolderOpen,
     accent: "bg-violet-500/10 text-violet-400 ring-violet-500/20",
   },
+  {
+    href: "/teams",
+    label: "Teams",
+    sub: "Real-time chat spaces. Create one, or join with a code.",
+    Icon: Users,
+    accent: "bg-sky-500/10 text-sky-400 ring-sky-500/20",
+  },
 ] as const;
 
 export default function MemuxHome() {
@@ -47,7 +54,7 @@ export default function MemuxHome() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
           {TILES.map(({ href, label, sub, Icon, accent }) => (
             <Link
               key={href}
