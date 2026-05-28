@@ -34,11 +34,18 @@ export interface TeamRoomState {
    * attachments must be present.
    */
   send: (body: string, attachments?: ChatAttachment[]) => boolean;
+  /**
+   * Ask the server to delete a message. Sender-only — the DO silently
+   * drops the request if you're not the sender. Returns true if the
+   * frame went out, false if the socket is closed.
+   */
+  deleteMessage: (id: string, createdAt: string) => boolean;
 }
 
 type ServerFrame =
   | { type: "hello"; you: string; presence: string[]; history: ChatMessage[] }
   | { type: "message"; message: ChatMessage }
+  | { type: "deleted"; id: string }
   | { type: "presence"; join?: string; leave?: string; current: string[] }
   | { type: "pong" };
 
@@ -99,6 +106,9 @@ export function useTeamRoom(teamId: string | null): TeamRoomState {
             break;
           case "message":
             setMessages((prev) => [...prev, frame.message]);
+            break;
+          case "deleted":
+            setMessages((prev) => prev.filter((m) => m.id !== frame.id));
             break;
           case "presence":
             setPresence((prev) => {
@@ -165,5 +175,16 @@ export function useTeamRoom(teamId: string | null): TeamRoomState {
     [],
   );
 
-  return { status, myId, messages, presence, send };
+  const deleteMessage = useCallback((id: string, createdAt: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      ws.send(JSON.stringify({ type: "delete", id, createdAt }));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  return { status, myId, messages, presence, send, deleteMessage };
 }

@@ -54,5 +54,61 @@
       "tag": "v1",
       "new_sqlite_classes": ["TeamRoom"]
     }
-  ]
+  ],
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Production environment overrides.
+  //
+  // Wrangler `env.<name>` blocks do NOT inherit bindings, so D1 / R2 /
+  // DO are redeclared here. Deploy with:
+  //     wrangler deploy --env production
+  //
+  // Before the first deploy, edit:
+  //   - BETTER_AUTH_URL    → the workers.dev URL printed by `wrangler deploy`
+  //   - TRUSTED_ORIGINS    → the Vercel app URL (comma-separated for multi)
+  //
+  // Then add that same workers.dev URL to Google Cloud Console:
+  //   Authorised redirect URIs → <URL>/api/auth/callback/google
+  //
+  // For a single-resource hackathon setup we reuse the same D1 + R2 as
+  // dev. Spin separate ones up later by creating new D1/R2 and pasting
+  // the new ids/names here.
+  // ─────────────────────────────────────────────────────────────────────
+  "env": {
+    "production": {
+      "name": "memux-backend",
+      "vars": {
+        "BETTER_AUTH_URL": "https://memux-backend.REPLACE-ME.workers.dev",
+        "TRUSTED_ORIGINS": "https://REPLACE-ME.vercel.app"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "memux",
+          "database_id": "96176247-ca7c-4d49-bf49-0e839624ac5d",
+          "migrations_dir": "src/db/migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEMUX_ATTACHMENTS",
+          "bucket_name": "memux-attachments"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "TEAM_ROOM",
+            "class_name": "TeamRoom"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": ["TeamRoom"]
+        }
+      ]
+    }
+  }
 }

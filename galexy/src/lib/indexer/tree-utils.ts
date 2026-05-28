@@ -25,6 +25,115 @@ export type TreeSummary = {
   textToHref: Map<string, string>;
 };
 
+/**
+ * One anchor / href pair from the pruned a11y tree, used both:
+ *  - to brief the Visioner so it can render markdown links inline naturally
+ *    when it transcribes the anchor text, and
+ *  - to populate `sections.links` with high-confidence canonical hrefs
+ *    that the agent can query later via get_section_links.
+ */
+export type AvailableLink = { text: string; href: string };
+
+/**
+ * Collect every role=link node from the tree as an AvailableLink. Dedupes
+ * by href (first anchor text wins) and caps the list so we don't drown
+ * the Visioner prompt on link-heavy pages.
+ *
+ * `text` is normalised whitespace-trimmed but case-preserved — the
+ * Visioner needs the natural-case form to render naturally inline.
+ */
+/**
+ * Scan a section's markdown content for outbound URLs, merge with any
+ * tree-provided hrefs that the section's prose actually mentions, and
+ * return a deduped SectionLink-shape array.
+ *
+ * Sources, in priority order (per-href dedupe — later sources don't
+ * overwrite a higher-priority record):
+ *   1. "transcribed" — inline `[anchor](href)` already written into the md
+ *      (most reliable: Visioner saw the link and chose to keep it)
+ *   2. "tree" — href from the run-level tree, where the anchor text appears
+ *      anywhere in the section md (case-insensitive substring match)
+ *   3. "bare-url" — any http(s):// URL not already covered, captured by
+ *      regex over the section md (catches links the model dropped on the floor)
+ *
+ * Hrefs are normalised before dedupe: query and fragment kept, trailing
+ * punctuation stripped from bare-URL captures.
+ */
+export function harvestSectionLinks(
+  sectionMd: string,
+  treeLinks: ReadonlyArray<AvailableLink>,
+): Array<{ href: string; anchor: string; source: "tree" | "transcribed" | "bare-url" }> {
+  const byHref = new Map<
+    string,
+    { href: string; anchor: string; source: "tree" | "transcribed" | "bare-url" }
+  >();
+
+  // 1. transcribed: inline [text](http...) links
+  const inlineRe = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = inlineRe.exec(sectionMd)) !== null) {
+    const href = stripTrailingPunctuation(m[2]);
+    if (!byHref.has(href)) {
+      byHref.set(href, { href, anchor: m[1].trim(), source: "transcribed" });
+    }
+  }
+
+  // 2. tree: hrefs whose anchor text the section mentions (case-insensitive)
+  const lowerMd = sectionMd.toLowerCase();
+  for (const link of treeLinks) {
+    if (byHref.has(link.href)) continue;
+    if (link.text.length < 3) continue; // too short to safely substring-match
+    if (lowerMd.includes(link.text.toLowerCase())) {
+      byHref.set(link.href, {
+        href: link.href,
+        anchor: link.text,
+        source: "tree",
+      });
+    }
+  }
+
+  // 3. bare-url: http(s):// not already captured. Skip URLs sitting inside
+  //    markdown link parens (those were handled in step 1).
+  const bareRe = /(?<!\]\()https?:\/\/[^\s<>()[\]"']+/g;
+  while ((m = bareRe.exec(sectionMd)) !== null) {
+    const href = stripTrailingPunctuation(m[0]);
+    if (!byHref.has(href)) {
+      byHref.set(href, { href, anchor: "", source: "bare-url" });
+    }
+  }
+
+  return Array.from(byHref.values());
+}
+
+function stripTrailingPunctuation(url: string): string {
+  return url.replace(/[.,;:!?)>\]'"]+$/, "");
+}
+
+export function collectAvailableLinks(root: unknown, cap = 80): AvailableLink[] {
+  const seen = new Set<string>();
+  const out: AvailableLink[] = [];
+
+  function visit(node: unknown): void {
+    if (out.length >= cap || !node || typeof node !== "object") return;
+    const n = node as TreeNode;
+    if (n.role === "link" && n.href) {
+      const text = (n.name ?? n.text ?? "").replace(/\s+/g, " ").trim();
+      // Keep links even with short anchors (icon-only links etc.) — the
+      // Visioner may decide whether to use them. But drop the truly empty.
+      if (text.length >= 1 && !seen.has(n.href)) {
+        seen.add(n.href);
+        out.push({ text, href: n.href });
+      }
+    }
+    for (const child of n.children ?? []) {
+      if (out.length >= cap) return;
+      visit(child);
+    }
+  }
+  visit(root);
+  return out;
+}
+
 /** Walk a tree once, collect the node count and build a text→href map. */
 export function summariseTree(root: unknown): TreeSummary {
   const textToHref = new Map<string, string>();

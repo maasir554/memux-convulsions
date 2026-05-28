@@ -21,9 +21,11 @@
  *  - server → client
  *      { type: "hello",     presence: [userId…], history: [ChatMessage…] }
  *      { type: "message",   message: ChatMessage }
+ *      { type: "deleted",   id: string }
  *      { type: "presence",  join?: userId, leave?: userId, current: [userId…] }
  *  - client → server
  *      { type: "send",      body: string }
+ *      { type: "delete",    id: string, createdAt: string }   (sender only)
  *      { type: "ping" }       (optional keep-alive; runtime also pings)
  */
 
@@ -125,6 +127,15 @@ export class TeamRoom extends DurableObject<WorkerEnv> {
 
     if (msg.type === "ping") {
       try { ws.send(JSON.stringify({ type: "pong" })); } catch { /* socket dead */ }
+      return;
+    }
+
+    if (msg.type === "delete") {
+      const del = msg as { id?: unknown; createdAt?: unknown };
+      if (typeof del.id !== "string" || typeof del.createdAt !== "string") return;
+      const attached = ws.deserializeAttachment() as Attachment | null;
+      if (!attached) return;
+      await this.deleteMessage(del.id, del.createdAt, attached.userId);
       return;
     }
 
@@ -258,6 +269,40 @@ export class TeamRoom extends DurableObject<WorkerEnv> {
   private async storeMessage(m: ChatMessage): Promise<void> {
     const ms = Date.parse(m.createdAt);
     await this.ctx.storage.put(messageKey(ms, m.id), m);
+  }
+
+  /**
+   * Delete a message + its R2 attachments. Sender-only for now; admin/owner
+   * delete-any can be layered on by having the Worker pass a role header.
+   * Idempotent — silently no-ops if the key has already been removed or the
+   * requester isn't the sender.
+   */
+  private async deleteMessage(
+    id: string,
+    createdAt: string,
+    requesterId: string,
+  ): Promise<void> {
+    const ms = Date.parse(createdAt);
+    if (!Number.isFinite(ms)) return;
+    const key = messageKey(ms, id);
+    const stored = await this.ctx.storage.get<ChatMessage>(key);
+    if (!stored || stored.id !== id) return;
+    if (stored.senderId !== requesterId) return;
+
+    await this.ctx.storage.delete(key);
+
+    // Best-effort R2 cleanup — chat survives if one of these throws.
+    if (stored.attachments) {
+      for (const a of stored.attachments) {
+        try {
+          await this.env.MEMUX_ATTACHMENTS.delete(a.key);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    this.broadcast({ type: "deleted", id });
   }
 
   /**

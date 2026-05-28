@@ -29,20 +29,34 @@ function rewriteCitationsForSanitizer(md: string): string {
     .replace(/]\(vault:([^)\s]+)\)/g, `](https://${VAULT_HOST}/item/$1)`);
 }
 
-function extractVaultId(url: string, prefix: string): string | null {
-  // Accept both `https://vault.local/<prefix>/<id>` (post-rewrite) and the
-  // raw `vault:` / `vault-image:` form (in case anyone else upstream skips
-  // the rewriter). Robust to either.
+/**
+ * Pull the vault item id out of a URL the renderer thinks points at a
+ * vault citation/embed. Accepts any of:
+ *   • https://vault.local/item/<id>          (post-rewrite text citation)
+ *   • https://vault.local/image/<id>         (post-rewrite image embed)
+ *   • https://vault.local/<anything>/<id>    (defensive — model variants)
+ *   • vault:<id>                             (raw, pre-rewrite)
+ *   • vault-image:<id>                       (raw, pre-rewrite)
+ *
+ * We intentionally do NOT distinguish citation vs. embed by the URL path
+ * — that decision is driven by the markdown element type (`<a>` → cite,
+ * `<img>` → embed) at the call site. Letting the URL drive that choice
+ * was load-bearing on the model getting the scheme exactly right, which
+ * isn't a guarantee we can rely on. Now ANY vault.local URL with a path
+ * segment after the host returns its id.
+ */
+function extractVaultId(url: string): string | null {
   try {
     const u = new URL(url);
-    if (u.host === VAULT_HOST && u.pathname.startsWith(`/${prefix}/`)) {
-      return decodeURIComponent(u.pathname.slice(`/${prefix}/`.length));
+    if (u.host === VAULT_HOST) {
+      const m = u.pathname.match(/^\/[^/]+\/(.+)$/);
+      if (m) return decodeURIComponent(m[1]);
     }
   } catch {
-    // not an absolute URL — fall through to direct-scheme check
+    // Not an absolute URL — fall through to direct-scheme checks below.
   }
-  const rawPrefix = prefix === "image" ? "vault-image:" : "vault:";
-  if (url.startsWith(rawPrefix)) return url.slice(rawPrefix.length);
+  if (url.startsWith("vault:")) return url.slice("vault:".length);
+  if (url.startsWith("vault-image:")) return url.slice("vault-image:".length);
   return null;
 }
 
@@ -55,7 +69,10 @@ function extractVaultId(url: string, prefix: string): string | null {
  */
 const citationComponents: Components = {
   a({ href, children, ...rest }) {
-    const id = typeof href === "string" ? extractVaultId(href, "item") : null;
+    // Markdown `[…](…)` → text citation. Any vault.local URL or raw
+    // vault: / vault-image: scheme resolves to a VaultCitation chip;
+    // the path subkind (item / image / etc.) is ignored deliberately.
+    const id = typeof href === "string" ? extractVaultId(href) : null;
     if (id) {
       return <VaultCitation itemId={id} display={children} />;
     }
@@ -66,7 +83,10 @@ const citationComponents: Components = {
     );
   },
   img({ src, alt, ...rest }) {
-    const id = typeof src === "string" ? extractVaultId(src, "image") : null;
+    // Markdown `![…](…)` → inline embed. Same URL forms accepted; same
+    // subkind-agnostic logic. If the resolved item isn't an image the
+    // embed component shows the themed broken-image fallback.
+    const id = typeof src === "string" ? extractVaultId(src) : null;
     if (id) {
       return (
         <VaultImageEmbed

@@ -35,6 +35,12 @@ import {
 } from "@/lib/chat/tools/graph";
 import { listConcepts, getConcept, type ListConceptsInput, type GetConceptInput } from "@/lib/chat/tools/concepts";
 import { findImageRegion, type FindImageRegionInput } from "@/lib/chat/tools/find-image-region";
+import {
+  getSectionLinks,
+  querySectionTree,
+  type GetSectionLinksInput,
+  type QuerySectionTreeInput,
+} from "@/lib/chat/tools/section-tree";
 
 export type ToolDef = {
   name: ToolName;
@@ -221,6 +227,33 @@ export const TOOLS: ToolDef[] = [
       required: ["itemId", "query"],
     },
     handler: (input, signal) => findImageRegion(input as FindImageRegionInput, signal),
+  },
+  {
+    name: "get_section_links",
+    description:
+      "Return the structured list of external hyperlinks captured for a section at index time. Each entry has {href, anchor, source: tree|transcribed|bare-url}. Use to answer 'what does this section link to' without scraping prose.",
+    parameters: {
+      type: "object",
+      properties: {
+        sectionId: { type: "string", description: "sections.id (typically from a section row, not a vault item id)." },
+      },
+      required: ["sectionId"],
+    },
+    handler: (input, _signal) => getSectionLinks(input as GetSectionLinksInput),
+  },
+  {
+    name: "query_section_tree",
+    description:
+      "Ask a structural question about the captured web page a section was indexed from (e.g. 'what other links were on this page', 'what's the heading hierarchy', 'list all navigation items'). Runs a side agent over the pruned accessibility tree and returns a tight answer + supporting nodes. Use for questions the section markdown can't answer alone.",
+    parameters: {
+      type: "object",
+      properties: {
+        sectionId: { type: "string", description: "sections.id whose run's tree to query." },
+        query: { type: "string", description: "Natural-language question about the page's structure or contents." },
+      },
+      required: ["sectionId", "query"],
+    },
+    handler: (input, signal) => querySectionTree(input as QuerySectionTreeInput, signal),
   },
 ];
 

@@ -36,6 +36,13 @@ export type VisionerInput = {
    * an anchor for topic-transition decisions — see VISIONER_SYSTEM.
    */
   documentOutline?: string;
+  /**
+   * External links present on the captured page, harvested from the
+   * pruned a11y tree. The Visioner is instructed to render anchor text
+   * it transcribes as markdown links using the matching href. Empty /
+   * undefined when no tree was captured (e.g. uploaded PDFs).
+   */
+  availableLinks?: Array<{ text: string; href: string }>;
 };
 
 export type Diagram = {
@@ -95,7 +102,13 @@ Document outline rules — only apply when a "Document outline" is included in t
 - Your 'topic' field should match an outline entry verbatim when that heading is visibly present on this page.
 - 'transition' = "new" ONLY when the page visibly contains a heading that matches the next outline entry after the current sessionState topic.
 - 'transition' = "continue" when you don't see any outline-matching heading break and the content is a mid-flow extension of the previous page.
-- Do NOT emit content that quotes outline entries you cannot see on this page. The outline is for orientation only — the model of record is still the image you're reading.`;
+- Do NOT emit content that quotes outline entries you cannot see on this page. The outline is for orientation only — the model of record is still the image you're reading.
+
+External link rules — only apply when an "Available links" list is included in the prompt:
+- The list is anchor-text → href for every link the captured page exposed in its accessibility tree. Use it to write proper markdown links when you transcribe.
+- Whenever you transcribe text that exactly or near-exactly matches one of the listed anchor texts, render it as [transcribed text](href) using the matching href. Don't paraphrase the anchor text away — if the visible page says "Open-source Repo", write it as "Open-source Repo" so the link is preserved.
+- Only use hrefs from the list. Do NOT invent URLs. If the page text mentions a URL inline (e.g. "visit example.com") and it's NOT in the list, write the URL out as plain text — the post-process pass will pick it up.
+- It's fine if some listed anchors don't appear on this page — only link the ones you actually transcribe.`;
 
 export async function visioner(
   input: VisionerInput,
@@ -104,9 +117,18 @@ export async function visioner(
   const outlineBlock = input.documentOutline
     ? `\nDOCUMENT OUTLINE (whole page, for anchoring topic decisions — see system rules):\n${input.documentOutline}\n`
     : "";
+  // Available links block: tight key=value list, capped earlier by the
+  // caller. Each line is `<href>\t<anchor>` so the model can scan
+  // quickly and the format isn't ambiguous with the surrounding prose.
+  const linksBlock =
+    input.availableLinks && input.availableLinks.length > 0
+      ? `\nAVAILABLE LINKS (anchor → href; render any of these inline when transcribing — see system rules):\n${input.availableLinks
+          .map((l) => `  - "${l.text}" → ${l.href}`)
+          .join("\n")}\n`
+      : "";
   const prompt = `File: ${input.fileName}
 Page: ${input.pageOrdinal}
-${outlineBlock}
+${outlineBlock}${linksBlock}
 USER CONTEXT (may be empty):
 ${input.userContext || "(none)"}
 
@@ -262,6 +284,71 @@ Describe the attached image and classify it.`;
       system: IMAGE_READER_SYSTEM,
       schema: IMAGE_READER_SCHEMA,
       temperature: 0.2,
+      think: false,
+    },
+    signal,
+  );
+}
+
+/* ----------------------------------------------- tree-query */
+
+export type TreeQueryInput = {
+  /** The pruned accessibility tree, serialised as compact JSON. */
+  treeJson: string;
+  /** Natural-language question about the tree's structure / contents. */
+  query: string;
+  /** Optional caption identifying the page the tree belongs to. */
+  pageTitle?: string;
+};
+
+export type TreeQueryOutput = {
+  /** 1-3 sentence direct answer in plain prose. */
+  answer: string;
+  /**
+   * Tight slice of relevant nodes the answer drew from. Each entry is a
+   * compact stringified node — `<role> "<name>" → <href?>` — so the chat
+   * agent can quote specifics back to the user. Capped at 12 to keep
+   * follow-up context small.
+   */
+  relevantNodes: string[];
+};
+
+const TREE_QUERY_SCHEMA = `{
+  answer: string,            // 1-3 plain-prose sentences answering the query directly. No tree dump.
+  relevantNodes: string[]    // up to 12 short stringified nodes that support the answer, format: '<role> "<name>" [→ <href>]'
+}`;
+
+const TREE_QUERY_SYSTEM = `You are the Tree Query agent. You receive a pruned accessibility tree of a captured web page (JSON) plus a natural-language query about the page's structure or contents.
+
+The tree's shape: each node has { role, name?, text?, tag?, href?, src?, state?, children? }. Roles include "heading", "link", "button", "navigation", "main", "img", and generic containers.
+
+Your job:
+1. Navigate the tree mentally to locate the nodes relevant to the query.
+2. Answer in 1-3 sentences of plain prose. Be specific — quote names, hrefs, headings verbatim when the user is asking about them.
+3. List up to 12 tightly-relevant nodes in relevantNodes[], each as a short string '<role> "<name>" → <href?>'. Skip irrelevant ancestors.
+
+Rules:
+- NEVER invent nodes or hrefs that aren't in the tree.
+- If the query is unanswerable from the tree, say so plainly in 'answer' and return relevantNodes: [].
+- Don't dump the tree. Don't paste node JSON. Answer + tight list only.
+- Keep relevantNodes ordered by relevance, most-relevant first.`;
+
+export async function treeQuery(
+  input: TreeQueryInput,
+  signal: AbortSignal,
+): Promise<TreeQueryOutput> {
+  const prompt = `${input.pageTitle ? `Page: ${input.pageTitle}\n\n` : ""}Query: ${input.query}
+
+ACCESSIBILITY TREE (JSON):
+${input.treeJson}
+
+Answer the query using the tree.`;
+  return jsonCall<TreeQueryOutput>(
+    {
+      prompt,
+      system: TREE_QUERY_SYSTEM,
+      schema: TREE_QUERY_SCHEMA,
+      temperature: 0.15,
       think: false,
     },
     signal,

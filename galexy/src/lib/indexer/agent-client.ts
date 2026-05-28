@@ -14,6 +14,8 @@ import type {
   RegionFinderOutput,
   SummariserInput,
   SummariserOutput,
+  TreeQueryInput,
+  TreeQueryOutput,
   VisionerInput,
   VisionerOutput,
 } from "@/lib/indexer/agents";
@@ -75,6 +77,13 @@ export function regionFinderCall(
   signal?: AbortSignal,
 ): Promise<RegionFinderOutput> {
   return callAgent("regionFinder", input, signal);
+}
+
+export function treeQueryCall(
+  input: TreeQueryInput,
+  signal?: AbortSignal,
+): Promise<TreeQueryOutput> {
+  return callAgent("treeQuery", input, signal);
 }
 
 /** Embed batch — uses /v1/embed directly (no agent dispatch needed). */

@@ -77,7 +77,9 @@ export type ToolName =
   | "list_concepts"
   | "get_concept"
   | "find_evidence"
-  | "find_image_region";
+  | "find_image_region"
+  | "get_section_links"
+  | "query_section_tree";
 
 /**
  * Minimal handle on an item the LLM can pass around without us shipping the
@@ -128,7 +130,20 @@ export type ToolUIPayload =
   | { kind: "folder-list"; folderPath: string; entries: ItemRef[] }
   | { kind: "concept-detail"; name: string; mentions: ItemRef[] }
   | { kind: "date-results"; range: { from: string; to: string }; entries: ItemRef[] }
-  | { kind: "scratchpad-merge"; before: number; after: number; delta: number };
+  | { kind: "scratchpad-merge"; before: number; after: number; delta: number }
+  | {
+      kind: "section-links";
+      sectionId: string;
+      sectionTitle: string;
+      links: Array<{ href: string; anchor: string; source: "tree" | "transcribed" | "bare-url" }>;
+    }
+  | {
+      kind: "tree-query";
+      sectionId: string;
+      query: string;
+      answer: string;
+      relevantNodes: string[];
+    };
 
 /* ============================================================== events */
 

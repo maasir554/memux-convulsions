@@ -3,11 +3,13 @@ import {
   namer,
   regionFinder,
   summariser,
+  treeQuery,
   visioner,
   type ImageReaderInput,
   type NamerInput,
   type RegionFinderInput,
   type SummariserInput,
+  type TreeQueryInput,
   type VisionerInput,
 } from "@/lib/indexer/agents";
 
@@ -19,7 +21,8 @@ type AgentBody =
   | { kind: "summariser"; input: SummariserInput }
   | { kind: "namer"; input: NamerInput }
   | { kind: "imageReader"; input: ImageReaderInput }
-  | { kind: "regionFinder"; input: RegionFinderInput };
+  | { kind: "regionFinder"; input: RegionFinderInput }
+  | { kind: "treeQuery"; input: TreeQueryInput };
 
 export async function POST(req: Request): Promise<Response> {
   let body: AgentBody;
@@ -49,6 +52,9 @@ export async function POST(req: Request): Promise<Response> {
         break;
       case "regionFinder":
         result = await regionFinder(body.input, req.signal);
+        break;
+      case "treeQuery":
+        result = await treeQuery(body.input, req.signal);
         break;
       default: {
         const _exhaustive: never = body;

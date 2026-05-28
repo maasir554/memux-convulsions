@@ -11,7 +11,7 @@
  * does.
  */
 
-import { ExternalLink, Folder, Image as ImageIcon, FileText, FileCode2, FileSpreadsheet, FileBox } from "lucide-react";
+import { ExternalLink, Folder, Image as ImageIcon, FileText, FileCode2, FileSpreadsheet, FileBox, Link2, Network } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useBlobUrl } from "@/components/galexy/use-blob-url";
@@ -43,6 +43,10 @@ export function ToolView({ payload }: { payload: ToolUIPayload | null }) {
       return <ConceptDetailView payload={payload} />;
     case "date-results":
       return <DateResultsView payload={payload} />;
+    case "section-links":
+      return <SectionLinksView payload={payload} />;
+    case "tree-query":
+      return <TreeQueryView payload={payload} />;
     case "pdf-page":
     case "scratchpad-merge":
     default:
@@ -322,6 +326,113 @@ function DateResultsView({
           <ItemRow key={r.itemId} r={r} />
         ))}
       </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------- section-links view */
+
+const SOURCE_TONE: Record<"tree" | "transcribed" | "bare-url", string> = {
+  tree: "bg-sky-500/15 text-sky-300",
+  transcribed: "bg-emerald-500/15 text-emerald-300",
+  "bare-url": "bg-muted/50 text-muted-foreground",
+};
+
+const SOURCE_LABEL: Record<"tree" | "transcribed" | "bare-url", string> = {
+  tree: "tree",
+  transcribed: "inline",
+  "bare-url": "bare",
+};
+
+function SectionLinksView({
+  payload,
+}: {
+  payload: Extract<ToolUIPayload, { kind: "section-links" }>;
+}) {
+  return (
+    <div className="flex h-full flex-col gap-3 p-3">
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <Link2 className="size-3.5" />
+        <span className="truncate text-foreground/80">{payload.sectionTitle}</span>
+        <span>·</span>
+        <span>{payload.links.length} link{payload.links.length === 1 ? "" : "s"}</span>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
+        {payload.links.length === 0 ? (
+          <div className="rounded-md border border-dashed border-muted-foreground/30 px-3 py-4 text-center text-xs text-muted-foreground">
+            No external links captured for this section.
+          </div>
+        ) : (
+          payload.links.map((l) => (
+            <a
+              key={l.href}
+              href={l.href}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="flex items-start gap-2 rounded-md border border-border/60 bg-card/40 px-2.5 py-2 text-xs no-underline hover:border-foreground/30 hover:bg-card/70"
+            >
+              <ExternalLink className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate font-medium text-foreground/90">
+                    {l.anchor || l.href}
+                  </span>
+                  <span
+                    className={cn(
+                      "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider",
+                      SOURCE_TONE[l.source],
+                    )}
+                  >
+                    {SOURCE_LABEL[l.source]}
+                  </span>
+                </div>
+                <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/70">
+                  {l.href}
+                </div>
+              </div>
+            </a>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------- tree-query view */
+
+function TreeQueryView({
+  payload,
+}: {
+  payload: Extract<ToolUIPayload, { kind: "tree-query" }>;
+}) {
+  return (
+    <div className="flex h-full flex-col gap-3 p-3">
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <Network className="size-3.5" />
+        <span>Tree query · §{payload.sectionId.slice(-6)}</span>
+      </div>
+      <div className="rounded-md border border-border/60 bg-card/40 px-3 py-2 text-[11px]">
+        <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Question</div>
+        <div className="mt-0.5 italic text-foreground/85">{payload.query}</div>
+      </div>
+      <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-3 text-[12px] leading-relaxed text-foreground/90">
+        {payload.answer}
+      </div>
+      {payload.relevantNodes.length > 0 && (
+        <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground">
+            Supporting nodes ({payload.relevantNodes.length})
+          </div>
+          {payload.relevantNodes.map((node, i) => (
+            <div
+              key={i}
+              className="truncate rounded-md border border-border/40 bg-card/30 px-2 py-1 font-mono text-[10.5px] text-foreground/80"
+            >
+              {node}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

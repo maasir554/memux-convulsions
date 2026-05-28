@@ -258,8 +258,33 @@ export const sections = pgTable("sections", {
     .$type<Array<{ blobKey: string; caption: string; alt: string; bbox?: [number, number, number, number] }>>()
     .notNull()
     .default([]),
+  /**
+   * External hyperlinks associated with this section. Populated at index
+   * time from three sources, deduped by href:
+   *   - "tree":         href came from a role=link node in the pruned a11y tree
+   *                     whose anchor text the Visioner mentioned in this section
+   *   - "transcribed":  the Visioner wrote out the link verbatim as [text](url)
+   *   - "bare-url":     a bare URL was found inline by post-process regex scan
+   *
+   * Surfaces in the section md (already inline) AND as a structured list the
+   * chat agent can query via `get_section_links` without parsing prose.
+   */
+  links: jsonb("links")
+    .$type<SectionLink[]>()
+    .notNull()
+    .default([]),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
 });
+
+/**
+ * One external link captured against a section. `anchor` is the visible
+ * text the link appears under (best-effort — empty for bare URLs).
+ */
+export type SectionLink = {
+  href: string;
+  anchor: string;
+  source: "tree" | "transcribed" | "bare-url";
+};
 
 export const SECTIONS_CREATE = `
 CREATE TABLE IF NOT EXISTS sections (
@@ -357,6 +382,7 @@ export const INDEXER_DDL: readonly string[] = [
 export const INDEXER_MIGRATIONS: readonly string[] = [
   `ALTER TABLE index_runs ADD COLUMN IF NOT EXISTS dom_images jsonb NOT NULL DEFAULT '[]'::jsonb;`,
   `ALTER TABLE index_runs ADD COLUMN IF NOT EXISTS pruned_tree jsonb;`,
+  `ALTER TABLE sections ADD COLUMN IF NOT EXISTS links jsonb NOT NULL DEFAULT '[]'::jsonb;`,
 ];
 
 export type DbSection = typeof sections.$inferSelect;

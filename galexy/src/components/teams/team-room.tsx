@@ -29,6 +29,7 @@ import {
   Loader2,
   Paperclip,
   Send,
+  Trash2,
   UserPlus,
   Users,
   X,
@@ -173,7 +174,11 @@ function RoomShell({
 
       {/* Body: messages | presence */}
       <div className="flex min-h-0 flex-1">
-        <MessageList messages={room.messages} myId={room.myId} />
+        <MessageList
+          messages={room.messages}
+          myId={room.myId}
+          onDelete={room.deleteMessage}
+        />
         <PresenceSidebar
           members={team.members}
           online={room.presence}
@@ -234,9 +239,11 @@ function StatusDot({ status }: { status: "connecting" | "open" | "closed" | "err
 function MessageList({
   messages,
   myId,
+  onDelete,
 }: {
   messages: ChatMessage[];
   myId: string | null;
+  onDelete: (id: string, createdAt: string) => boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickyBottomRef = useRef(true);
@@ -264,28 +271,34 @@ function MessageList({
   return (
     <div
       ref={scrollRef}
-      className="flex min-w-0 flex-1 flex-col gap-0.5 overflow-y-auto px-4 py-3"
+      className="flex min-w-0 flex-1 flex-col overflow-y-auto px-4 py-3"
     >
-      {messages.length === 0 ? (
-        <div className="my-auto text-center text-xs text-muted-foreground">
-          No messages yet. Say hi.
-        </div>
-      ) : (
-        messages.map((m, i) => {
-          const prev = i > 0 ? messages[i - 1] : null;
-          const sameSender =
-            prev && prev.senderId === m.senderId &&
-            Date.parse(m.createdAt) - Date.parse(prev.createdAt) < 5 * 60_000;
-          return (
-            <MessageRow
-              key={m.id}
-              msg={m}
-              compact={Boolean(sameSender)}
-              isMine={m.senderId === myId}
-            />
-          );
-        })
-      )}
+      {/* Width cap — keep messages readable on a wide monitor. */}
+      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-0.5">
+        {messages.length === 0 ? (
+          <div className="my-auto text-center text-xs text-muted-foreground">
+            No messages yet. Say hi.
+          </div>
+        ) : (
+          messages.map((m, i) => {
+            const prev = i > 0 ? messages[i - 1] : null;
+            // "Continuous same person" — collapse the header + avatar.
+            // Time isn't a factor anymore because each bubble carries
+            // its own timestamp; a multi-hour gap stays legible.
+            const sameSender = prev && prev.senderId === m.senderId;
+            const isMine = m.senderId === myId;
+            return (
+              <MessageRow
+                key={m.id}
+                msg={m}
+                compact={Boolean(sameSender)}
+                isMine={isMine}
+                onDelete={isMine ? () => onDelete(m.id, m.createdAt) : undefined}
+              />
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
@@ -294,13 +307,28 @@ function MessageRow({
   msg,
   compact,
   isMine,
+  onDelete,
 }: {
   msg: ChatMessage;
   compact: boolean;
   isMine: boolean;
+  /** Provided only when the viewer can delete this message (currently: own messages). */
+  onDelete?: () => boolean;
 }) {
+  function handleDelete() {
+    if (!onDelete) return;
+    if (!window.confirm("Delete this message? Attached files will also be removed.")) return;
+    onDelete();
+  }
+
   return (
-    <div className={cn("flex gap-2.5", compact ? "mt-0.5" : "mt-3")}>
+    <div
+      className={cn(
+        "group flex gap-2.5",
+        compact ? "mt-0.5" : "mt-3",
+        isMine && "flex-row-reverse",
+      )}
+    >
       <div className="w-8 shrink-0">
         {!compact &&
           (msg.senderImage ? (
@@ -317,31 +345,79 @@ function MessageRow({
             </div>
           ))}
       </div>
-      <div className="min-w-0 flex-1">
+      <div
+        className={cn(
+          "flex min-w-0 max-w-[80%] flex-col",
+          isMine ? "items-end" : "items-start",
+        )}
+      >
         {!compact && (
-          <div className="flex items-baseline gap-2">
-            <span className={cn("text-sm font-medium", isMine && "text-foreground")}>
-              {msg.senderName}
-            </span>
-            <span className="text-[10px] text-muted-foreground">
-              {formatTime(msg.createdAt)}
-            </span>
+          <div className="mb-0.5">
+            <span className="text-sm font-medium">{msg.senderName}</span>
           </div>
         )}
         {msg.body && (
-          <div className="text-sm whitespace-pre-wrap break-words text-foreground/90">
-            {msg.body}
+          <div
+            className={cn(
+              "flex items-center gap-1.5",
+              isMine && "flex-row-reverse",
+            )}
+          >
+            <div
+              className={cn(
+                "rounded-2xl px-3 py-1.5 text-sm whitespace-pre-wrap break-words",
+                isMine
+                  ? "bg-primary/15 text-foreground"
+                  : "bg-muted/60 text-foreground/90",
+              )}
+            >
+              {msg.body}
+              {/* Trailing timestamp inside the bubble, iMessage-style.
+                  Inline-block so a long message wraps the time onto a
+                  fresh line right-aligned instead of forcing the bubble
+                  to be one giant row. */}
+              <span className="ml-2 inline-block translate-y-0.5 text-[10px] text-muted-foreground/70 align-baseline">
+                {formatTime(msg.createdAt)}
+              </span>
+            </div>
+            {onDelete && (
+              <DeleteButton onClick={handleDelete} />
+            )}
           </div>
         )}
         {msg.attachments && msg.attachments.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-2">
+          <div
+            className={cn(
+              "mt-1 flex flex-wrap items-end gap-2",
+              isMine && "flex-row-reverse",
+            )}
+          >
             {msg.attachments.map((a) => (
               <AttachmentTile key={a.key} attachment={a} />
             ))}
+            {/* When there's no body, the trash lives next to the
+                attachments so image-only messages are still deletable. */}
+            {!msg.body && onDelete && (
+              <DeleteButton onClick={handleDelete} />
+            )}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+function DeleteButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Delete message"
+      title="Delete message"
+      className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive group-hover:opacity-100 focus:opacity-100"
+    >
+      <Trash2 className="size-3.5" />
+    </button>
   );
 }
 
@@ -562,60 +638,63 @@ function Composer({
 
   return (
     <div className="shrink-0 border-t bg-background p-3">
-      {pending.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2">
-          {pending.map((p) => (
-            <PendingChip
-              key={p.id}
-              pending={p}
-              onRemove={() => setPending((prev) => prev.filter((x) => x.id !== p.id))}
-            />
-          ))}
+      {/* Width-cap the composer to match the message column. */}
+      <div className="mx-auto w-full max-w-3xl">
+        {pending.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {pending.map((p) => (
+              <PendingChip
+                key={p.id}
+                pending={p}
+                onRemove={() => setPending((prev) => prev.filter((x) => x.id !== p.id))}
+              />
+            ))}
+          </div>
+        )}
+        <div className="flex items-end gap-2">
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled}
+            title="Attach files"
+            aria-label="Attach files"
+          >
+            <Paperclip className="size-4" />
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              void handleFiles(e.target.files);
+              e.target.value = ""; // allow re-selecting the same file
+            }}
+          />
+          <textarea
+            ref={taRef}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder={disabled ? "Connecting…" : "Type a message…  (Enter to send)"}
+            disabled={disabled}
+            rows={1}
+            className="flex-1 resize-none rounded-md border bg-card px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring/50 disabled:opacity-60"
+          />
+          <Button onClick={submit} disabled={!canSend}>
+            {hasUploading ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+          </Button>
         </div>
-      )}
-      <div className="flex items-end gap-2">
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled}
-          title="Attach files"
-          aria-label="Attach files"
-        >
-          <Paperclip className="size-4" />
-        </Button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            void handleFiles(e.target.files);
-            e.target.value = ""; // allow re-selecting the same file
-          }}
-        />
-        <textarea
-          ref={taRef}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={disabled ? "Connecting…" : "Type a message…  (Enter to send)"}
-          disabled={disabled}
-          rows={1}
-          className="flex-1 resize-none rounded-md border bg-card px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring/50 disabled:opacity-60"
-        />
-        <Button onClick={submit} disabled={!canSend}>
-          {hasUploading ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
-        </Button>
-      </div>
-      <div className="mt-1 text-[10px] text-muted-foreground">
-        Enter sends · Shift+Enter for newline · attach files up to 25 MB
+        <div className="mt-1 text-[10px] text-muted-foreground">
+          Enter sends · Shift+Enter for newline · attach files up to 25 MB
+        </div>
       </div>
     </div>
   );
@@ -629,6 +708,62 @@ function PendingChip({
   onRemove: () => void;
 }) {
   const sizeLabel = formatBytes(pending.file.size);
+  const isImage = pending.file.type.startsWith("image/");
+
+  // Local preview for images. Lazy-init so the URL is computed once per
+  // chip; the cleanup effect revokes it when this chip unmounts (remove
+  // or send) — important on mobile to free the blob.
+  const [previewUrl] = useState<string | null>(() =>
+    pending.file.type.startsWith("image/") ? URL.createObjectURL(pending.file) : null,
+  );
+  useEffect(() => {
+    if (!previewUrl) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  // Image variant: thumbnail tile with overlay status + remove button.
+  if (isImage) {
+    return (
+      <div
+        className={cn(
+          "group relative size-16 overflow-hidden rounded-md border bg-card",
+          pending.status === "error" && "border-destructive/40",
+        )}
+        title={`${pending.file.name} · ${sizeLabel}`}
+      >
+        {previewUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={previewUrl}
+            alt={pending.file.name}
+            className="size-full object-cover"
+          />
+        )}
+        {pending.status === "uploading" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/50">
+            <Loader2 className="size-4 animate-spin text-foreground" />
+          </div>
+        )}
+        {pending.status === "error" && (
+          <div
+            className="absolute inset-0 flex items-center justify-center bg-destructive/20 text-[10px] font-semibold text-destructive uppercase"
+            title={pending.error}
+          >
+            err
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Remove"
+          className="absolute top-0.5 right-0.5 rounded-full bg-background/80 p-0.5 text-foreground/80 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus:opacity-100"
+        >
+          <X className="size-3" />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(

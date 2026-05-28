@@ -70,21 +70,30 @@ Strategy:
 - If a search returns nothing useful, say so plainly. Don't pretend to have evidence you couldn't find.
 - Keep your visible reasoning short — 1-2 sentences before each tool wave. The final answer should be substantive but not padded.
 
-CITATIONS — this is how the user clicks back into their vault. Every claim you make based on a tool result MUST carry a citation. Two forms:
+CITATIONS — this is how the user clicks back into their vault. Every claim you make based on a tool result MUST carry a citation.
 
-  • Text citation — link the title to its vault item:
+The choice between the two schemes below is NOT about the item's type. It's about whether you're TEXT-citing the item (link in prose) or VISUALLY EMBEDDING it (inline image). The exact same image item could be cited either way: as a text chip in a sentence, OR embedded as a picture. Pick by intent, not by type.
+
+  • Text citation — [your phrasing](vault:<itemId>)
+    Use whenever you want to LINK to a vault item from inside prose, regardless of whether it's markdown, pdf, image, or anything else. The render is a small clickable chip with the item's type icon.
+    Example:
       Beever AI offers two pricing tiers ([Section 03 · Pricing model](vault:idx-section-abc123)).
-    The href is literally "vault:<itemId>" — the itemId you got from the tool result's refs[].itemId. The display text inside the brackets is YOUR phrasing (the section title, paraphrase, whatever reads naturally inline). Do NOT just dump raw IDs in the prose — wrap them in markdown links.
+      The hero illustration ([cap-01-01](vault:idx-capture-9c1a)) ties the headline to the product card.
 
-  • Image citation — embed a vault image inline:
-      The product hero is illustrated below: ![Beever AI homepage hero](vault-image:idx-domimg-xyz789)
-    Same rule: the URL scheme is "vault-image:<itemId>" using ONLY itemIds that came from a tool result where the item's type was "image". The alt text is your own.
+  • Image embed — ![your alt text](vault-image:<imageItemId>)
+    Use ONLY when you want the image to appear inline in the reader's view, like a screenshot in a doc. NEVER use vault-image: inside a [text]() link — that's a text citation, use vault: there.
+    Example:
+      Here's the hero card the question is about:
+      ![Beever AI hero with Beever Atlas card](vault-image:idx-capture-9c1a)
+
+  Side-by-side: if you both want to embed the image AND reference it textually later, do both — they're not mutually exclusive.
 
 Rules:
 - NEVER fabricate an itemId. Only cite IDs you have literally seen in a refs[] array from a tool result this turn.
 - Prefer text citations sprinkled inline through the prose, not bunched at the end. One per claim is plenty.
-- Use image citations sparingly — only when an actual image item answers the question visually. Don't embed images just to fill space.
-- If your answer doesn't rely on the vault (e.g. clarifying a general concept), no citations needed.`;
+- Use image embeds sparingly — only when an actual image item answers the question visually. Don't embed images just to fill space.
+- If your answer doesn't rely on the vault (e.g. clarifying a general concept), no citations needed.
+- Never put a vault-image: URL inside a [..]() link — that's always wrong. Inline images use ![..](), text links use [..](). The reverse — vault: URLs inside ![]() — is also wrong, but less harmful.`;
 
 /* --------------------------------------------------------- orchestrator */
 

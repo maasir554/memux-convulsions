@@ -50,6 +50,8 @@ const TOOL_LABEL: Record<ToolName, string> = {
   get_concept: "Concept detail",
   find_evidence: "Find evidence",
   find_image_region: "Find image region",
+  get_section_links: "Section links",
+  query_section_tree: "Query a11y tree",
 };
 
 export function AgentPanel({ onClose }: { onClose?: () => void }) {

@@ -28,11 +28,14 @@ import {
 } from "@/lib/indexer/extractors";
 import {
   buildTreeOutline,
+  collectAvailableLinks,
   enrichLinks,
   findImageContext,
   formatImageContext,
   formatOutline,
+  harvestSectionLinks,
   summariseTree,
+  type AvailableLink,
 } from "@/lib/indexer/tree-utils";
 import {
   inlineDiagramRefs,
@@ -133,6 +136,13 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
   const outlineEntries = treeUsed ? buildTreeOutline(group.prunedTree) : [];
   const documentOutline =
     outlineEntries.length > 0 ? formatOutline(outlineEntries) : undefined;
+  // Anchor-text → href list harvested from the tree. Briefed to every
+  // Visioner call so the model can naturally render anchors as markdown
+  // links inline (vs. relying on post-process enrichment alone). Capped
+  // at 80 entries; ample for almost any landing-page-sized capture.
+  const availableLinks: AvailableLink[] = treeUsed
+    ? collectAvailableLinks(group.prunedTree)
+    : [];
 
   live.getState().startRun(runId, groupName || "(naming pending)", group.files.length, treeUsed);
   if (treeUsed) {
@@ -306,6 +316,7 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
             pageOrdinal: extracted.ordinal,
             fileName: fileRef.name,
             documentOutline,
+            availableLinks: availableLinks.length > 0 ? availableLinks : undefined,
           },
           signal,
         );
@@ -392,7 +403,10 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
       sum.concepts.forEach((c) => allConcepts.add(c));
 
       // Enrich the section md with markdown links pulled from the pruned
-      // tree's {text → href} map (no-op when no tree was captured).
+      // tree's {text → href} map (no-op when no tree was captured). The
+      // Visioner already renders most anchors as proper md links thanks
+      // to the availableLinks brief; this is the belt-and-braces pass
+      // for anchors it transcribed but didn't link.
       if (treeSummary.textToHref.size > 0) {
         const enriched = enrichLinks(sect.sectionMarkdown, treeSummary.textToHref);
         sect.sectionMarkdown = enriched.md;
@@ -403,6 +417,12 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
           );
         }
       }
+
+      // Harvest the per-section link set: inline [text](href) + tree hrefs
+      // whose anchor the section mentions + bare URLs caught by regex.
+      // Stored as structured jsonb so chat tools can query without
+      // re-parsing prose later.
+      const sectionLinks = harvestSectionLinks(sect.sectionMarkdown, availableLinks);
 
       // Write the section md.
       const noteItemId = await writeSectionNote({
@@ -432,6 +452,7 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
         questions: sum.questions,
         concepts: sum.concepts,
         images: [],
+        links: sectionLinks,
       });
 
       // Embed in the background — don't block the next section's summariser.
