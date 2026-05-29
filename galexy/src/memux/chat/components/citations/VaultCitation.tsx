@@ -197,32 +197,33 @@ function CapturePill({ noteItemId }: { noteItemId: string }) {
               : `Source: ${capture.title}`
           }
           className={cn(
-            "group/cap block w-full max-w-md overflow-hidden rounded-lg border border-border/60 bg-card/50 text-left",
+            "group/cap block w-[320px] overflow-hidden rounded-lg border border-border/60 bg-card/50 p-0 text-left",
             "transition-all hover:border-foreground/30 hover:shadow-md",
           )}
         >
-          {/* Header strip: favicon/glyph + host/title + open arrow */}
-          <span className="flex items-center gap-2 border-b border-border/40 bg-muted/30 px-2.5 py-1.5">
+          {/* Header strip — tight; height is just the text line + 4px each side */}
+          <span className="flex items-center gap-1.5 border-b border-border/40 bg-muted/30 px-2 py-1 leading-none">
             {host ? (
-              <Favicon host={host} className="size-3.5" />
+              <Favicon host={host} className="size-3" />
             ) : (
-              <FileBox className="size-3.5 text-rose-300/80" />
+              <FileBox className="size-3 text-rose-300/80" />
             )}
             <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground/85">
               {host ?? capture.title}
             </span>
-            <ExternalLink className="size-3 text-muted-foreground/70 transition-colors group-hover/cap:text-foreground/80" />
+            <ExternalLink className="size-2.5 text-muted-foreground/70 transition-colors group-hover/cap:text-foreground/80" />
           </span>
 
-          {/* Thumbnail body */}
-          <span className="block bg-background/40">
-            <img
-              src={src}
-              alt={capture.title}
-              className="block max-h-[160px] w-full object-cover object-top"
-              loading="lazy"
-            />
-          </span>
+          {/* Thumbnail — fixed width, natural aspect, capped so 4000px-tall
+              full-page captures don't blow up the chat. m-0 overrides
+              prose-img's default top/bottom margin so it sits flush with
+              the header divider. */}
+          <img
+            src={src}
+            alt={capture.title}
+            className="m-0 block w-full max-h-[260px] object-cover object-top"
+            loading="lazy"
+          />
         </button>
       </span>
       {modalOpen && (
