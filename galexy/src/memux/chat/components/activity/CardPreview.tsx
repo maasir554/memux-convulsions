@@ -7,13 +7,10 @@
  * find" in under a second of looking.
  */
 
+import Link from "next/link";
 import {
   ArrowUpRight,
   ExternalLink,
-  FileBox,
-  FileCode2,
-  FileSpreadsheet,
-  FileText,
   Folder,
   Image as ImageIcon,
   Link2,
@@ -22,10 +19,10 @@ import {
 
 import { cn } from "@/lib/utils";
 import { useBlobUrl } from "@/components/galexy/use-blob-url";
-import { useVaultItem } from "@/lib/chat/vault-resolver";
+import { HorizontalScroller } from "@/memux/chat/components/activity/HorizontalScroller";
+import { VaultItemThumb } from "@/memux/chat/components/activity/VaultItemThumb";
 import type { ActivityStep } from "@/memux/chat/lib/agent-store";
-import type { ItemRef, ToolUIPayload } from "@/lib/chat/types";
-import type { ItemType } from "@/lib/mock-notes";
+import type { ToolUIPayload } from "@/lib/chat/types";
 
 export function CardPreview({ step }: { step: ActivityStep }) {
   if (step.status === "running") {
@@ -110,45 +107,6 @@ function RenderPayload({ payload }: { payload: ToolUIPayload }) {
   }
 }
 
-/* ------------------------------------------------- shared bits */
-
-function ItemIconForType({ type }: { type: ItemType }) {
-  const cls = "size-3.5 shrink-0";
-  switch (type) {
-    case "code": return <FileCode2 className={cn(cls, "text-sky-400")} />;
-    case "csv": return <FileSpreadsheet className={cn(cls, "text-emerald-400")} />;
-    case "pdf": return <FileBox className={cn(cls, "text-rose-400")} />;
-    case "image": return <ImageIcon className={cn(cls, "text-violet-400")} />;
-    case "markdown":
-    default: return <FileText className={cn(cls, "text-sky-300")} />;
-  }
-}
-
-/** Small thumbnail loader for image-type ItemRefs. Falls back to icon. */
-function ResultThumb({ ref }: { ref: ItemRef }) {
-  const { item } = useVaultItem(ref.type === "image" ? ref.itemId : null);
-  const blobUrl = useBlobUrl(item?.blobKey ?? undefined);
-  if (ref.type !== "image") {
-    return (
-      <div className="flex size-12 shrink-0 items-center justify-center rounded-md border border-border/50 bg-muted/30">
-        <ItemIconForType type={ref.type} />
-      </div>
-    );
-  }
-  if (!blobUrl) {
-    return (
-      <div className="flex size-12 shrink-0 items-center justify-center rounded-md border border-border/50 bg-muted/30">
-        <ImageIcon className="size-3.5 text-muted-foreground/50" />
-      </div>
-    );
-  }
-  return (
-    <div className="size-12 shrink-0 overflow-hidden rounded-md border border-border/50 bg-muted/30">
-      <img src={blobUrl} alt={ref.title} className="size-full object-cover" loading="lazy" />
-    </div>
-  );
-}
-
 /* ----------------------------------------------- search-results */
 
 function SearchResultsPreview({
@@ -156,12 +114,10 @@ function SearchResultsPreview({
 }: {
   payload: Extract<ToolUIPayload, { kind: "search-results" }>;
 }) {
-  const top = payload.results.slice(0, 5);
-
   // Empty-result case: still surface the query so the user can see WHAT
   // was searched (otherwise a card that just reads "No results." gives
   // them no signal at all about what the agent tried).
-  if (top.length === 0) {
+  if (payload.results.length === 0) {
     return (
       <div className="text-[11px] text-muted-foreground">
         <span className="italic">&ldquo;{payload.query}&rdquo;</span>{" "}
@@ -171,37 +127,22 @@ function SearchResultsPreview({
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       <div className="truncate text-[11px] text-muted-foreground">
         <span className="italic">&ldquo;{payload.query}&rdquo;</span>{" "}
         <span className="text-muted-foreground/60">· {payload.results.length} hits</span>
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {top.map((r, i) => (
-          <div
+      <HorizontalScroller className="-mx-1 px-1" ariaLabel="Search results">
+        {payload.results.map((r) => (
+          <VaultItemThumb
             key={r.itemId}
-            title={r.snippet || r.title}
-            // Per-chip stagger entrance — same ws-card-enter keyframe the
-            // outer card uses, just smaller delays so a wave of chips
-            // cascades in instead of popping all at once.
-            className="ws-card-enter flex max-w-full items-center gap-1.5 rounded-md border border-border/50 bg-muted/30 px-1.5 py-1 text-[11px]"
-            style={{ animationDelay: `${60 + i * 70}ms` }}
-          >
-            <ItemIconForType type={r.type} />
-            <span className="max-w-[18ch] truncate font-medium text-foreground/85">
-              {r.title}
-            </span>
-          </div>
+            itemId={r.itemId}
+            title={r.title}
+            type={r.type}
+            caption={r.snippet || r.title}
+          />
         ))}
-        {payload.results.length > top.length && (
-          <span
-            className="ws-card-enter self-center text-[10px] text-muted-foreground/60"
-            style={{ animationDelay: `${60 + top.length * 70}ms` }}
-          >
-            +{payload.results.length - top.length} more
-          </span>
-        )}
-      </div>
+      </HorizontalScroller>
     </div>
   );
 }
@@ -214,8 +155,11 @@ function ItemDetailPreview({
   payload: Extract<ToolUIPayload, { kind: "item-detail" }>;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div className="truncate text-[12px] font-medium text-foreground/90">
+    <Link
+      href={`/vault?open=${encodeURIComponent(payload.itemId)}`}
+      className="group/itd flex flex-col gap-1"
+    >
+      <div className="truncate text-[12px] font-medium text-foreground/90 group-hover/itd:text-primary">
         {payload.title}
       </div>
       {payload.bodyMd && (
@@ -223,7 +167,7 @@ function ItemDetailPreview({
           {stripMd(payload.bodyMd)}
         </div>
       )}
-    </div>
+    </Link>
   );
 }
 
@@ -235,14 +179,17 @@ function SectionReadPreview({
   payload: Extract<ToolUIPayload, { kind: "section-read" }>;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div className="truncate text-[12px] font-medium text-foreground/90">
+    <Link
+      href={`/vault?open=${encodeURIComponent(payload.noteItemId)}`}
+      className="group/sec flex flex-col gap-1"
+    >
+      <div className="truncate text-[12px] font-medium text-foreground/90 group-hover/sec:text-primary">
         {payload.sectionTitle}
       </div>
       <div className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground/85">
         {stripMd(payload.markdown)}
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -256,8 +203,11 @@ function ImageReadPreview({
   const blobUrl = useBlobUrl(payload.blobKey);
   const src = blobUrl ?? payload.src ?? null;
   return (
-    <div className="flex items-start gap-2.5">
-      <div className="size-16 shrink-0 overflow-hidden rounded-md border border-border/50 bg-muted/30">
+    <Link
+      href={`/vault?open=${encodeURIComponent(payload.itemId)}`}
+      className="group/img flex items-start gap-2.5"
+    >
+      <div className="size-16 shrink-0 overflow-hidden rounded-md border border-border/50 bg-muted/30 transition-colors group-hover/img:border-primary/50">
         {src ? (
           <img src={src} alt={payload.alt} className="size-full object-cover" loading="lazy" />
         ) : (
@@ -267,12 +217,14 @@ function ImageReadPreview({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[12px] font-medium text-foreground/90">{payload.alt}</div>
+        <div className="truncate text-[12px] font-medium text-foreground/90 group-hover/img:text-primary">
+          {payload.alt}
+        </div>
         <div className="line-clamp-3 text-[11px] leading-relaxed text-muted-foreground/85">
           {payload.description || "—"}
         </div>
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -285,15 +237,45 @@ function GraphFanPreview({
 }) {
   const inN = payload.incoming.length;
   const outN = payload.outgoing.length;
+  // Merge with a tag so each tile carries an "in/out" indicator without
+  // splitting the row into two scrollers (which would be cramped at 360px).
+  const all = [
+    ...payload.outgoing.map((r) => ({ ref: r, dir: "out" as const })),
+    ...payload.incoming.map((r) => ({ ref: r, dir: "in" as const })),
+  ];
   return (
-    <div className="flex items-center gap-2 text-[11px] text-muted-foreground/85">
-      <span>
-        <span className="font-mono text-foreground">{inN}</span> in
-      </span>
-      <span className="size-1 rounded-full bg-muted-foreground/40" />
-      <span>
-        <span className="font-mono text-foreground">{outN}</span> out
-      </span>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground/85">
+        <span>
+          <span className="font-mono text-foreground">{outN}</span> out
+        </span>
+        <span className="size-1 rounded-full bg-muted-foreground/40" />
+        <span>
+          <span className="font-mono text-foreground">{inN}</span> in
+        </span>
+      </div>
+      {all.length > 0 && (
+        <HorizontalScroller className="-mx-1 px-1" ariaLabel="Graph neighbours">
+          {all.map(({ ref, dir }) => (
+            <div key={`${dir}-${ref.itemId}`} className="relative">
+              <VaultItemThumb
+                itemId={ref.itemId}
+                title={ref.title}
+                type={ref.type}
+                caption={`${dir === "out" ? "→ outgoing" : "← incoming"} · ${ref.title}`}
+              />
+              <span
+                className={cn(
+                  "absolute left-1 top-1 rounded-sm px-1 py-px font-mono text-[8.5px] leading-none text-white shadow-sm",
+                  dir === "out" ? "bg-sky-600/80" : "bg-violet-600/80",
+                )}
+              >
+                {dir === "out" ? "→" : "←"}
+              </span>
+            </div>
+          ))}
+        </HorizontalScroller>
+      )}
     </div>
   );
 }
@@ -306,22 +288,27 @@ function FolderListPreview({
   payload: Extract<ToolUIPayload, { kind: "folder-list" }>;
 }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-2">
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <Folder className="size-3.5 text-amber-400" />
         <span className="truncate font-mono text-[10px]">{payload.folderPath}</span>
         <span className="text-muted-foreground/60">· {payload.entries.length}</span>
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {payload.entries.slice(0, 4).map((r) => (
-          <ResultThumb key={r.itemId} ref={r} />
-        ))}
-        {payload.entries.length > 4 && (
-          <span className="self-center text-[10px] text-muted-foreground/60">
-            +{payload.entries.length - 4}
-          </span>
-        )}
-      </div>
+      {payload.entries.length === 0 ? (
+        <div className="text-[11px] italic text-muted-foreground/60">empty folder</div>
+      ) : (
+        <HorizontalScroller className="-mx-1 px-1" ariaLabel="Folder contents">
+          {payload.entries.map((r) => (
+            <VaultItemThumb
+              key={r.itemId}
+              itemId={r.itemId}
+              title={r.title}
+              type={r.type}
+              caption={r.snippet || r.title}
+            />
+          ))}
+        </HorizontalScroller>
+      )}
     </div>
   );
 }
@@ -334,11 +321,26 @@ function ConceptDetailPreview({
   payload: Extract<ToolUIPayload, { kind: "concept-detail" }>;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div className="text-[12px] font-medium text-foreground/90">{payload.name}</div>
-      <div className="text-[11px] text-muted-foreground/85">
-        {payload.mentions.length} mention{payload.mentions.length === 1 ? "" : "s"}
+    <div className="flex flex-col gap-2">
+      <div className="flex items-baseline gap-2">
+        <div className="text-[12px] font-medium text-foreground/90">{payload.name}</div>
+        <div className="text-[11px] text-muted-foreground/85">
+          · {payload.mentions.length} mention{payload.mentions.length === 1 ? "" : "s"}
+        </div>
       </div>
+      {payload.mentions.length > 0 && (
+        <HorizontalScroller className="-mx-1 px-1" ariaLabel="Concept mentions">
+          {payload.mentions.map((r) => (
+            <VaultItemThumb
+              key={r.itemId}
+              itemId={r.itemId}
+              title={r.title}
+              type={r.type}
+              caption={r.snippet || r.title}
+            />
+          ))}
+        </HorizontalScroller>
+      )}
     </div>
   );
 }
@@ -351,13 +353,30 @@ function DateResultsPreview({
   payload: Extract<ToolUIPayload, { kind: "date-results" }>;
 }) {
   return (
-    <div className="text-[11px] text-muted-foreground/85">
-      <span className="font-mono text-foreground">
-        {payload.range.from || "…"}
-      </span>
-      <span className="mx-1.5 text-muted-foreground/60">→</span>
-      <span className="font-mono text-foreground">{payload.range.to || "now"}</span>
-      <span className="ml-2 text-muted-foreground/60">· {payload.entries.length} items</span>
+    <div className="flex flex-col gap-2">
+      <div className="text-[11px] text-muted-foreground/85">
+        <span className="font-mono text-foreground">
+          {payload.range.from || "…"}
+        </span>
+        <span className="mx-1.5 text-muted-foreground/60">→</span>
+        <span className="font-mono text-foreground">{payload.range.to || "now"}</span>
+        <span className="ml-2 text-muted-foreground/60">
+          · {payload.entries.length} item{payload.entries.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      {payload.entries.length > 0 && (
+        <HorizontalScroller className="-mx-1 px-1" ariaLabel="Date-range items">
+          {payload.entries.map((r) => (
+            <VaultItemThumb
+              key={r.itemId}
+              itemId={r.itemId}
+              title={r.title}
+              type={r.type}
+              caption={r.snippet || r.title}
+            />
+          ))}
+        </HorizontalScroller>
+      )}
     </div>
   );
 }
