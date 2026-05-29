@@ -6,7 +6,6 @@ import { cn } from "@/memux/chat/lib/utils";
 import { VaultCitation } from "@/memux/chat/components/citations/VaultCitation";
 import { VaultImageEmbed } from "@/memux/chat/components/citations/VaultImageEmbed";
 import { VaultGraphEmbed } from "@/memux/chat/components/citations/VaultGraphEmbed";
-import { VaultConceptCloud } from "@/memux/chat/components/citations/VaultConceptCloud";
 import { VaultChartEmbed } from "@/memux/chat/components/citations/VaultChartEmbed";
 import { VaultTimelineEmbed } from "@/memux/chat/components/citations/VaultTimelineEmbed";
 import { VaultTableEmbed } from "@/memux/chat/components/citations/VaultTableEmbed";
@@ -30,10 +29,9 @@ import { VaultOutlineEmbed } from "@/memux/chat/components/citations/VaultOutlin
 const VAULT_HOST = "vault.local";
 
 // The widget schemes — order matters: longer prefixes first, otherwise
-// `vault:` would gobble `vault-concepts:` etc.
+// `vault:` would gobble `vault-timeline:` etc.
 const VAULT_SCHEMES: Array<[string, string]> = [
   ["vault-timeline", "timeline"],
-  ["vault-concepts", "concepts"],
   ["vault-outline", "outline"],
   ["vault-image", "image"],
   ["vault-graph", "graph"],
@@ -44,11 +42,11 @@ const VAULT_SCHEMES: Array<[string, string]> = [
 
 function rewriteCitationsForSanitizer(md: string): string {
   // The regex MUST allow whitespace in the URL position — chart/timeline/
-  // table/outline/concept specs frequently contain spaces in their labels
+  // table/outline specs frequently contain spaces in their labels
   // ("BFSI Cybersecurity", "Section 02 · Overview"). Markdown's own image
   // parser would bail on unescaped spaces, so we explicitly URL-encode
   // the captured value before substituting in the fake vault.local URL.
-  // Without this, Streamdown sees `![alt](vault-concepts:A B,C D)` as
+  // Without this, Streamdown sees `![alt](vault-chart:A B,C D)` as
   // invalid and renders it as literal text.
   let out = md;
   for (const [scheme, path] of VAULT_SCHEMES) {
@@ -69,7 +67,6 @@ type VaultWidget =
   | { kind: "item"; value: string }
   | { kind: "image"; value: string }
   | { kind: "graph"; value: string }
-  | { kind: "concepts"; value: string }
   | { kind: "chart"; value: string }
   | { kind: "timeline"; value: string }
   | { kind: "table"; value: string }
@@ -78,7 +75,6 @@ type VaultWidget =
 const EMBED_KINDS = new Set([
   "image",
   "graph",
-  "concepts",
   "chart",
   "timeline",
   "table",
@@ -105,7 +101,6 @@ function extractVaultWidget(url: string): VaultWidget | null {
   // Raw schemes (pre-rewrite). Order matters — longer prefixes first.
   const rawMatchers: Array<[string, VaultWidget["kind"]]> = [
     ["vault-timeline:", "timeline"],
-    ["vault-concepts:", "concepts"],
     ["vault-outline:", "outline"],
     ["vault-chart:", "chart"],
     ["vault-graph:", "graph"],
@@ -146,7 +141,6 @@ const citationComponents: Components = {
   img({ src, alt, ...rest }) {
     // `![…](…)` → inline embed. The path subkind picks which widget:
     //   /graph/    → VaultGraphEmbed (mini knowledge graph)
-    //   /concepts/ → VaultConceptCloud
     //   /chart/    → VaultChartEmbed (bar / pie / donut / line / area)
     //   /timeline/ → VaultTimelineEmbed (horizontal chronology)
     //   /table/    → VaultTableEmbed (side-by-side comparison)
@@ -158,7 +152,6 @@ const citationComponents: Components = {
     if (w) {
       const altText = typeof alt === "string" ? alt : "";
       if (w.kind === "graph") return <VaultGraphEmbed ids={w.value} alt={altText} />;
-      if (w.kind === "concepts") return <VaultConceptCloud concepts={w.value} alt={altText} />;
       if (w.kind === "chart") return <VaultChartEmbed spec={w.value} alt={altText} />;
       if (w.kind === "timeline") return <VaultTimelineEmbed spec={w.value} alt={altText} />;
       if (w.kind === "table") return <VaultTableEmbed spec={w.value} alt={altText} />;

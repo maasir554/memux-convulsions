@@ -99,11 +99,6 @@ WIDGETS — beyond text + images, two structured widgets are available. Each ren
     Example:
       ![Items behind this answer](vault-graph:idx-section-abc,idx-section-def,idx-capture-9c1a,idx-section-ghi)
 
-  • Concept cloud — ![label](vault-concepts:term1,term2,term3)
-    A pill cloud of the most relevant concepts surfaced by your search. Each pill is clickable — the user taps to insert it into the composer for a follow-up. Use ONCE at the end of answers that exposed a rich concept landscape. 6-15 terms is the sweet spot. Concepts are PLAIN WORDS, not itemIds — use natural English phrases ("retrieval-augmented generation", "vector embeddings", "BM25"). Most important first.
-    Example:
-      ![Related concepts](vault-concepts:retrieval-augmented generation,vector embeddings,BM25,reciprocal rank fusion)
-
   • Chart — ![title](vault-chart:<type>,label1:value1,label2:value2,…)
     Supported types: bar, pie, donut, line, area. Use when you have actual numeric data to visualise. Pie/donut for proportional breakdowns ("storage by category"), bar for comparisons across categories ("hits by source"), line/area for time series. 3-8 data points is the sweet spot — fewer feels sparse, more crowds the SVG. Labels are PLAIN TEXT. Values are NUMBERS only (no units).
     Example:
@@ -134,7 +129,7 @@ Rules:
 - Use image embeds sparingly — only when an actual image item answers the question visually. Don't embed images just to fill space.
 - Widgets at most ONE of each per answer. They're closing flourishes, not headers.
 - If your answer doesn't rely on the vault (e.g. clarifying a general concept), no citations needed.
-- Never put a vault-image: / vault-graph: / vault-concepts: / vault-chart: / vault-timeline: / vault-table: / vault-outline: URL inside a [..]() link — those are embeds, not text citations. Use ![..](). Plain vault: links use [..]().`;
+- Never put a vault-image: / vault-graph: / vault-chart: / vault-timeline: / vault-table: / vault-outline: URL inside a [..]() link — those are embeds, not text citations. Use ![..](). Plain vault: links use [..]().`;
 
 /* ------------------------------------------------ widget enrichment pass */
 
@@ -166,13 +161,16 @@ Widgets available (only emit when the data clearly fits):
     When the answer references 3+ distinct vault item IDs with meaningful relationships. Comma-separated itemIds copied verbatim from the answer's citations. Cap at ~10 items.
     Example: ![Items behind this answer](vault-graph:idx-section-abc,idx-section-def,idx-capture-9c1a)
 
-  • Concept cloud — ![label](vault-concepts:term1,term2,term3)
-    When the answer surfaces 6+ recurring named concepts. Plain natural-language phrases — not item IDs. Most important first.
-    Example: ![Related concepts](vault-concepts:retrieval-augmented generation,vector embeddings,BM25)
-
   • Chart — ![title](vault-chart:<type>,label1:value1,label2:value2,…)
-    Types: bar, pie, donut, line, area. ONLY when the answer mentions ACTUAL NUMBERS attached to categories ("76 percent of X", "$2M in Y"). 3-8 data points. Labels are plain text. Values are bare numbers (no %, $, k).
+    Types: bar, pie, donut, line, area. ONLY when the answer mentions ACTUAL NUMBERS attached to categories ("76 percent of X", "$2M in Y"). 3-8 data points is the sweet spot. Labels are plain text. Values are bare numbers (no %, $, k).
     Example: ![Sector breakdown](vault-chart:pie,Banking:42,Insurance:33,Other:25)
+
+    SPECIAL CASE — binary percent answers. When the answer cites a single percentage that implies a yes/no or did/didn't split ("76 percent of X did Y", "83 percent now embed Z"), emit a 2-slice pie that visualises the implicit complement. Label the slices with what each side actually means, not "Yes/No":
+      Answer: "76 percent of Indian BFSI CISOs rank AI attacks among their top priorities."
+      Widget: ![CISO AI-attack priority](vault-chart:pie,Rank AI attacks top priority:76,Do not:24)
+      Answer: "83 percent of institutions now embed AI in cyber operations."
+      Widget: ![AI in cyber ops](vault-chart:pie,Embedding AI:83,Not yet:17)
+    Pick concise but truthful labels; never invent the inverse number — it's always 100 - percent.
 
   • Timeline — ![title](vault-timeline:label1@YYYY-MM-DD,label2@YYYY-MM-DD,…)
     ONLY when the answer mentions 3+ dated events. Optional #itemId suffix per dot.
@@ -189,13 +187,13 @@ Widgets available (only emit when the data clearly fits):
 Hard rules:
 - At MOST 3 widgets. Most answers earn 0 or 1.
 - One of each TYPE at most.
-- If the answer is a conversational reply, a refusal, or already contains widget syntax (\`vault-chart:\`, \`vault-table:\`, etc.), output nothing.
+- If the answer is a conversational reply, a refusal, or already contains widget syntax (\`vault-chart:\`, \`vault-table:\`, \`vault-timeline:\`, \`vault-outline:\`, \`vault-graph:\`), output nothing.
 - Output starts with \`![\` or is empty. No preamble, no closing remarks.`;
 
 /** Detect whether the assistant's text already contains widget markdown.
  *  When true, the enrichment pass is skipped — the main agent already
  *  decided this answer warranted a widget and we'd just be duplicating. */
-const WIDGET_ALREADY_PRESENT_RE = /!\[[^\]]*\]\(vault-(?:chart|table|timeline|outline|concepts|graph):/i;
+const WIDGET_ALREADY_PRESENT_RE = /!\[[^\]]*\]\(vault-(?:chart|table|timeline|outline|graph):/i;
 
 /** Heuristic gate for whether an answer is worth enriching. Bias toward
  *  skipping: a "no" here just means the user sees the main answer with no

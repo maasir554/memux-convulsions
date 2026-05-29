@@ -108,9 +108,11 @@ export function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingFiles]);
 
-  // Click-to-add-concept: VaultConceptCloud pills dispatch this event
-  // when clicked. We append the concept to the current draft (with a
-  // separator) so the user can phrase a follow-up around it.
+  // Generic compose-append channel: any widget (or other surface) can
+  // dispatch a `memux:compose-append` CustomEvent with { text } and the
+  // composer will fold the text into the current draft. The original
+  // caller was the concept-cloud widget; the listener stays because
+  // other surfaces may grow into it.
   useEffect(() => {
     function onAppend(e: Event) {
       const detail = (e as CustomEvent<{ text: string }>).detail;
