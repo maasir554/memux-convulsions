@@ -50,8 +50,25 @@ export function VaultChartEmbed({ spec, alt }: { spec: string; alt: string }) {
     );
   }
 
+  // Width policy varies by chart type:
+  //   - pie / donut: a fixed-size SVG sits next to a legend. Stretching
+  //     to max-w-2xl leaves dead horizontal space to the right of the
+  //     legend (the SVG never grows past its `size` constant). Use
+  //     `w-fit` so the card sizes to its content (capped at max-w-2xl
+  //     for the very longest legend labels).
+  //   - bar / line / area: the SVG uses `w-full` internally and the
+  //     data spread benefits from horizontal room. Stay at
+  //     `w-full max-w-2xl`.
+  const widthClass =
+    type === "pie" || type === "donut" ? "w-fit max-w-2xl" : "w-full max-w-2xl";
+
   return (
-    <div className="ws-widget-frame my-4 w-full max-w-2xl overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-card/60 via-card/30 to-muted/20">
+    <div
+      className={cn(
+        "ws-widget-frame my-4 overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-card/60 via-card/30 to-muted/20",
+        widthClass,
+      )}
+    >
       <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
         <ChartHeaderIcon type={type} />
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
