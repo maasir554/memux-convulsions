@@ -51,7 +51,7 @@ export function VaultChartEmbed({ spec, alt }: { spec: string; alt: string }) {
   }
 
   return (
-    <div className="my-4 w-full max-w-2xl overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-card/60 via-card/30 to-muted/20">
+    <div className="ws-widget-frame my-4 w-full max-w-2xl overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-card/60 via-card/30 to-muted/20">
       <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
         <ChartHeaderIcon type={type} />
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
