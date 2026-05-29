@@ -187,7 +187,7 @@ function CapturePill({ noteItemId }: { noteItemId: string }) {
 
   return (
     <>
-      <span className="my-2 block">
+      <span className="my-2 block leading-none">
         <button
           type="button"
           onClick={() => setModalOpen(true)}
@@ -197,31 +197,43 @@ function CapturePill({ noteItemId }: { noteItemId: string }) {
               : `Source: ${capture.title}`
           }
           className={cn(
-            "group/cap block w-[320px] overflow-hidden rounded-lg border border-border/60 bg-card/50 p-0 text-left",
+            "group/cap block overflow-hidden rounded-lg border border-border/60 bg-card/50 p-0 text-left",
             "transition-all hover:border-foreground/30 hover:shadow-md",
           )}
+          style={{ width: 320 }}
         >
-          {/* Header strip — tight; height is just the text line + 4px each side */}
-          <span className="flex items-center gap-1.5 border-b border-border/40 bg-muted/30 px-2 py-1 leading-none">
+          {/* Header strip — hard-locked to 24px tall via inline style so
+              prose's line-height: 1.5 inheritance can't blow it up. */}
+          <span
+            className="flex items-center gap-1.5 border-b border-border/40 bg-muted/30 px-2"
+            style={{ height: 24, lineHeight: 1 }}
+          >
             {host ? (
-              <Favicon host={host} className="size-3" />
+              <Favicon host={host} size={12} />
             ) : (
-              <FileBox className="size-3 text-rose-300/80" />
+              <FileBox className="size-3 text-rose-300/80" style={{ flexShrink: 0 }} />
             )}
-            <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground/85">
+            <span
+              className="min-w-0 flex-1 truncate font-medium text-foreground/85"
+              style={{ fontSize: 11, lineHeight: 1 }}
+            >
               {host ?? capture.title}
             </span>
-            <ExternalLink className="size-2.5 text-muted-foreground/70 transition-colors group-hover/cap:text-foreground/80" />
+            <ExternalLink
+              className="text-muted-foreground/70 transition-colors group-hover/cap:text-foreground/80"
+              style={{ width: 10, height: 10, flexShrink: 0 }}
+            />
           </span>
 
-          {/* Thumbnail — fixed width, natural aspect, capped so 4000px-tall
-              full-page captures don't blow up the chat. m-0 overrides
-              prose-img's default top/bottom margin so it sits flush with
-              the header divider. */}
+          {/* Thumbnail — fixed width 320, capped at 160 high; object-top
+              crops to the page header so even multi-thousand-pixel full
+              captures show their most recognisable region. Inline styles
+              beat prose-img's default margins. */}
           <img
             src={src}
             alt={capture.title}
-            className="m-0 block w-full max-h-[260px] object-cover object-top"
+            className="block w-full object-cover object-top"
+            style={{ maxHeight: 160, height: 160, margin: 0 }}
             loading="lazy"
           />
         </button>

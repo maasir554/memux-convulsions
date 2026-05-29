@@ -124,9 +124,12 @@ export function ImageModal({
  */
 export function Favicon({
   host,
-  className = "size-4",
+  size = 14,
+  className,
 }: {
   host: string;
+  /** Square edge in px. Default 14 (size-3.5). */
+  size?: number;
   className?: string;
 }) {
   return (
@@ -134,6 +137,20 @@ export function Favicon({
       src={`https://icons.duckduckgo.com/ip3/${host}.ico`}
       alt=""
       className={className}
+      // Inline width/height beats prose-img / em-relative sizing — the
+      // favicon should be exactly this many CSS px tall regardless of
+      // the font-size cascade.
+      width={size}
+      height={size}
+      style={{
+        width: size,
+        height: size,
+        minWidth: size,
+        minHeight: size,
+        objectFit: "contain",
+        display: "inline-block",
+        margin: 0,
+      }}
       onError={(e) => {
         // Swap to the inline Globe icon by replacing the node — cheapest
         // fallback without state. The parent re-renders are idempotent.
@@ -144,7 +161,9 @@ export function Favicon({
         svg.setAttribute("fill", "none");
         svg.setAttribute("stroke", "currentColor");
         svg.setAttribute("stroke-width", "2");
-        svg.setAttribute("class", el.className);
+        svg.setAttribute("width", String(size));
+        svg.setAttribute("height", String(size));
+        if (el.className) svg.setAttribute("class", el.className);
         const circle = document.createElementNS(svgNS, "circle");
         circle.setAttribute("cx", "12");
         circle.setAttribute("cy", "12");
@@ -152,8 +171,6 @@ export function Favicon({
         svg.appendChild(circle);
         el.replaceWith(svg);
       }}
-      // Hide the broken-image glyph while DDG is fetching.
-      style={{ minWidth: "1em", minHeight: "1em" }}
     />
   );
 }
