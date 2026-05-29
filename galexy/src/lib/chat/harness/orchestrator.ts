@@ -165,12 +165,7 @@ Widgets available (only emit when the data clearly fits):
     Types: bar, pie, donut, line, area. ONLY when the answer mentions ACTUAL NUMBERS attached to categories ("76 percent of X", "$2M in Y"). 3-8 data points is the sweet spot. Labels are plain text. Values are bare numbers (no %, $, k).
     Example: ![Sector breakdown](vault-chart:pie,Banking:42,Insurance:33,Other:25)
 
-    SPECIAL CASE — binary percent answers. When the answer cites a single percentage that implies a yes/no or did/didn't split ("76 percent of X did Y", "83 percent now embed Z"), emit a 2-slice pie that visualises the implicit complement. Label the slices with what each side actually means, not "Yes/No":
-      Answer: "76 percent of Indian BFSI CISOs rank AI attacks among their top priorities."
-      Widget: ![CISO AI-attack priority](vault-chart:pie,Rank AI attacks top priority:76,Do not:24)
-      Answer: "83 percent of institutions now embed AI in cyber operations."
-      Widget: ![AI in cyber ops](vault-chart:pie,Embedding AI:83,Not yet:17)
-    Pick concise but truthful labels; never invent the inverse number — it's always 100 - percent.
+    Single-percentage rule: an answer that cites exactly one percentage of a population is still chart-worthy — render it as a 2-slice pie where the second slice is the implicit complement (100 minus the cited number). Derive both slice labels from the answer's own wording: the positive slice is what the cited group does/has, the second slice is the natural negation of that. Never use generic "Yes/No". Never invent the complement number — it is always 100 minus the cited percent. Skip only when the percentage is of a non-binary base (e.g. "76% growth", "76% accuracy") — those describe magnitude, not a population split.
 
   • Timeline — ![title](vault-timeline:label1@YYYY-MM-DD,label2@YYYY-MM-DD,…)
     ONLY when the answer mentions 3+ dated events. Optional #itemId suffix per dot.
