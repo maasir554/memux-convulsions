@@ -136,6 +136,149 @@ Rules:
 - If your answer doesn't rely on the vault (e.g. clarifying a general concept), no citations needed.
 - Never put a vault-image: / vault-graph: / vault-concepts: / vault-chart: / vault-timeline: / vault-table: / vault-outline: URL inside a [..]() link — those are embeds, not text citations. Use ![..](). Plain vault: links use [..]().`;
 
+/* ------------------------------------------------ widget enrichment pass */
+
+/**
+ * Slim system prompt for the post-answer widget pass. The model is shown
+ * the user's question + the assistant's just-emitted answer and asked to
+ * surface ZERO or more widget markdown blocks that add visual clarity to
+ * the data the answer already cites. No prose, no rewrites, no tool
+ * calls.
+ *
+ * The widget docs intentionally mirror the main SYSTEM_PROMPT so the
+ * model sees one consistent contract — the only behavioural delta is the
+ * "emit nothing if not warranted" rule, which the main agent is more
+ * lax about (it's also writing prose, so widgets are decoration there).
+ */
+const WIDGET_ENRICHMENT_PROMPT = `You are a visualisation enrichment agent. The user asked a question and got a text answer with citations. Your sole job: read the answer and emit 0-3 widget markdown blocks that make its DATA easier to see at a glance.
+
+STRICT OUTPUT CONTRACT:
+- Output ONLY widget image-markdown blocks, separated by blank lines.
+- DO NOT write prose, headings, lists, transitions, or explanations.
+- DO NOT repeat or paraphrase the answer text.
+- DO NOT cite item IDs that don't appear in the answer.
+- If nothing in the answer is worth visualising, output the empty string (nothing at all). This is the default — bias toward less.
+- Each widget you emit must be supported by EXPLICIT data in the answer. No invented numbers, no invented categories.
+
+Widgets available (only emit when the data clearly fits):
+
+  • Knowledge graph — ![label](vault-graph:id1,id2,id3)
+    When the answer references 3+ distinct vault item IDs with meaningful relationships. Comma-separated itemIds copied verbatim from the answer's citations. Cap at ~10 items.
+    Example: ![Items behind this answer](vault-graph:idx-section-abc,idx-section-def,idx-capture-9c1a)
+
+  • Concept cloud — ![label](vault-concepts:term1,term2,term3)
+    When the answer surfaces 6+ recurring named concepts. Plain natural-language phrases — not item IDs. Most important first.
+    Example: ![Related concepts](vault-concepts:retrieval-augmented generation,vector embeddings,BM25)
+
+  • Chart — ![title](vault-chart:<type>,label1:value1,label2:value2,…)
+    Types: bar, pie, donut, line, area. ONLY when the answer mentions ACTUAL NUMBERS attached to categories ("76 percent of X", "$2M in Y"). 3-8 data points. Labels are plain text. Values are bare numbers (no %, $, k).
+    Example: ![Sector breakdown](vault-chart:pie,Banking:42,Insurance:33,Other:25)
+
+  • Timeline — ![title](vault-timeline:label1@YYYY-MM-DD,label2@YYYY-MM-DD,…)
+    ONLY when the answer mentions 3+ dated events. Optional #itemId suffix per dot.
+    Example: ![Key events](vault-timeline:Spec landed@2026-01-12,Demo@2026-03-15)
+
+  • Comparison table — ![title](vault-table:col1|col2|col3||row1c1|row1c2|row1c3)
+    ONLY when the answer compares 2+ entities across 2+ attributes. "||" between rows, "|" between cells. First row is headers. Up to 6 columns, 8 rows.
+    Example: ![Tools compared](vault-table:Tool|Coverage|Best for||A|Full|Substrings||B|Indexed|Vector search)
+
+  • Section outline — ![title](vault-outline:level-Text,~level-Text,…)
+    ONLY when the answer drew from one big multi-section doc you want to map. Each entry "<level>-<text>", level 1-6. Prefix "~" for sections that were actually read.
+    Example: ![Doc layout](vault-outline:1-Intro,2-Background,~2-Approach,~3-Method,2-Results)
+
+Hard rules:
+- At MOST 3 widgets. Most answers earn 0 or 1.
+- One of each TYPE at most.
+- If the answer is a conversational reply, a refusal, or already contains widget syntax (\`vault-chart:\`, \`vault-table:\`, etc.), output nothing.
+- Output starts with \`![\` or is empty. No preamble, no closing remarks.`;
+
+/** Detect whether the assistant's text already contains widget markdown.
+ *  When true, the enrichment pass is skipped — the main agent already
+ *  decided this answer warranted a widget and we'd just be duplicating. */
+const WIDGET_ALREADY_PRESENT_RE = /!\[[^\]]*\]\(vault-(?:chart|table|timeline|outline|concepts|graph):/i;
+
+/** Heuristic gate for whether an answer is worth enriching. Bias toward
+ *  skipping: a "no" here just means the user sees the main answer with no
+ *  appended widgets, which is the status quo. */
+function shouldEnrichWithWidgets(answer: string): boolean {
+  const trimmed = answer.trim();
+  if (trimmed.length < 200) return false;             // too short to justify
+  if (WIDGET_ALREADY_PRESENT_RE.test(trimmed)) return false; // already widgeted
+  // At least one vault citation. Without any, the answer is general knowledge
+  // and there's nothing widget-shaped to extract.
+  if (!/\]\(vault:/i.test(trimmed)) return false;
+  return true;
+}
+
+/**
+ * Fire a slim follow-up call after the main answer finishes. The model
+ * receives the question + answer and emits widget markdown which we
+ * stream as additional synth-tokens into the SAME assistant message
+ * (the UI just keeps appending). Non-blocking: failures, empties, and
+ * trigger-misses all degrade silently — the user sees the main answer
+ * exactly as before in those cases. Anti-loop: no tools, no recursion
+ * possible (this function never re-enters itself).
+ */
+async function maybeEnrichWithWidgets(args: {
+  model?: string;
+  question: string;
+  answer: string;
+  turnId: string;
+  onEvent: (e: ChatEvent) => void;
+  signal?: AbortSignal;
+}): Promise<void> {
+  if (!shouldEnrichWithWidgets(args.answer)) return;
+  try {
+    const stream = await openAgenticStream(
+      {
+        model: args.model,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `User question:\n${args.question}\n\nAssistant answer (already shown to user):\n${args.answer}`,
+              },
+            ],
+          },
+        ],
+        // No tools — pure text completion. Anti-loop guarantee.
+        systemInstruction: WIDGET_ENRICHMENT_PROMPT,
+        temperature: 0.2,
+        thinkingLevel: "MINIMAL",
+      },
+      args.signal,
+    );
+    // Inject a paragraph separator before the first enrichment token so
+    // the widgets visually detach from the main answer in the rendered
+    // markdown. Tracked by a closure so we only inject once.
+    let separatorEmitted = false;
+    const wrappedOnEvent: typeof args.onEvent = (e) => {
+      if (e.kind === "synth-token") {
+        if (!separatorEmitted) {
+          separatorEmitted = true;
+          args.onEvent({
+            kind: "synth-token",
+            turnId: args.turnId,
+            token: "\n\n",
+          });
+        }
+      } else if (e.kind === "reasoning") {
+        // Drop enrichment's internal reasoning from the user-facing
+        // activity stream — it's the same MINIMAL thinking line and
+        // would just clutter the agent panel.
+        return;
+      }
+      args.onEvent(e);
+    };
+    await consumeOneTurn(stream, args.turnId, wrappedOnEvent);
+  } catch (err) {
+    // Non-fatal: log and let the caller emit synth-done with whatever
+    // the main answer already produced.
+    console.warn("[orchestrator] widget enrichment failed:", err);
+  }
+}
+
 /* --------------------------------------------------------- orchestrator */
 
 export type RunChatTurnArgs = {
@@ -209,8 +352,18 @@ export async function runChatTurn(args: RunChatTurnArgs): Promise<void> {
         contents.push({ role: "model", parts: turn.modelParts });
       }
 
-      // If no function calls, the model finished. Emit the final text + done.
+      // If no function calls, the model finished. Run the widget
+      // enrichment pass (non-blocking: degrades silently on miss) and
+      // then emit the final text + done.
       if (turn.functionCalls.length === 0) {
+        await maybeEnrichWithWidgets({
+          model: args.model,
+          question: args.question,
+          answer: turn.textBuffer,
+          turnId,
+          onEvent: args.onEvent,
+          signal: args.signal,
+        });
         args.onEvent({ kind: "synth-done", turnId, finalText: turn.textBuffer });
         args.onEvent({ kind: "turn-done", turnId });
         return;
@@ -330,6 +483,17 @@ export async function runChatTurn(args: RunChatTurnArgs): Promise<void> {
       args.signal,
     );
     const finalTurn = await consumeOneTurn(finalStream, turnId, args.onEvent);
+    // Same enrichment opportunity on the hard-escape path — if the
+    // forced final answer is substantive, the user benefits from
+    // widgets the same way the normal-completion path does.
+    await maybeEnrichWithWidgets({
+      model: args.model,
+      question: args.question,
+      answer: finalTurn.textBuffer,
+      turnId,
+      onEvent: args.onEvent,
+      signal: args.signal,
+    });
     args.onEvent({
       kind: "synth-done",
       turnId,
