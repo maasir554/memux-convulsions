@@ -31,6 +31,8 @@ import "react-pdf/dist/Page/TextLayer.css";
 import {
   ChevronDown,
   ChevronUp,
+  Eye,
+  EyeOff,
   Loader2,
   Maximize2,
   Minus,
@@ -85,6 +87,7 @@ export function PdfPreview({
   // Annotations
   const annotationsEnabled = Boolean(teamId && attachmentKey);
   const [annotateMode, setAnnotateMode] = useState(false);
+  const [annotationsVisible, setAnnotationsVisible] = useState(true);
   const [annotations, setAnnotations] = useState<PdfAnnotation[]>([]);
   const [annotationsError, setAnnotationsError] = useState<string | null>(null);
 
@@ -326,22 +329,56 @@ export function PdfPreview({
 
         {/* Annotate toggle — only enabled when we have a teamId + key */}
         {annotationsEnabled && (
-          <Button
-            size="sm"
-            variant={annotateMode ? "default" : "outline"}
-            className="h-7 px-2"
-            onClick={() => setAnnotateMode((v) => !v)}
-            aria-pressed={annotateMode}
-            title="Draw an annotation"
-          >
-            <Pencil className="mr-1 size-3" />
-            {annotateMode ? "Drawing…" : "Annotate"}
-          </Button>
+          <>
+            <Button
+              size="sm"
+              variant={annotateMode ? "default" : "outline"}
+              className="h-7 px-2"
+              onClick={() => {
+                // Entering annotate mode while annotations are hidden
+                // would lead to a "drew a box that disappeared" surprise.
+                // Force-show on enter; leave the user's choice alone on exit.
+                setAnnotateMode((v) => {
+                  if (!v) setAnnotationsVisible(true);
+                  return !v;
+                });
+              }}
+              aria-pressed={annotateMode}
+              title="Draw an annotation"
+            >
+              <Pencil className="mr-1 size-3" />
+              {annotateMode ? "Drawing…" : "Annotate"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={() => setAnnotationsVisible((v) => !v)}
+              aria-pressed={!annotationsVisible}
+              disabled={annotateMode}
+              title={
+                annotateMode
+                  ? "Can't hide while drawing"
+                  : annotationsVisible
+                    ? `Hide annotations${annotations.length ? ` (${annotations.length})` : ""}`
+                    : `Show annotations${annotations.length ? ` (${annotations.length})` : ""}`
+              }
+            >
+              {annotationsVisible ? (
+                <Eye className="size-3.5" />
+              ) : (
+                <EyeOff className="size-3.5" />
+              )}
+            </Button>
+          </>
         )}
 
         <span className="ml-auto text-[10px] text-muted-foreground">
           ⌘/Ctrl + scroll to zoom
           {annotateMode && <> · drag on a page to draw a box</>}
+          {!annotateMode && annotationsEnabled && !annotationsVisible && annotations.length > 0 && (
+            <> · {annotations.length} annotation{annotations.length === 1 ? "" : "s"} hidden</>
+          )}
         </span>
       </div>
 
@@ -399,6 +436,7 @@ export function PdfPreview({
                 <AnnotationLayer
                   pageIdx={i}
                   annotations={pageAnnotations}
+                  showSaved={annotationsVisible}
                   myUserId={myUserId ?? null}
                   annotateMode={annotateMode}
                   onCreate={(input) => handleCreate({ page: i + 1, ...input })}
@@ -427,6 +465,7 @@ const DOC_OPTIONS = {
 
 function AnnotationLayer({
   annotations,
+  showSaved,
   myUserId,
   annotateMode,
   onCreate,
@@ -434,6 +473,10 @@ function AnnotationLayer({
 }: {
   pageIdx: number;
   annotations: PdfAnnotation[];
+  /** When false, saved annotations are not rendered. Drawing still works
+   *  if annotateMode is on — but the parent ensures showSaved is true
+   *  whenever drawing starts, so the just-drawn rect isn't invisible. */
+  showSaved: boolean;
   myUserId: string | null;
   annotateMode: boolean;
   onCreate: (input: { x: number; y: number; w: number; h: number; body: string }) => void;
@@ -514,14 +557,15 @@ function AnnotationLayer({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
     >
-      {annotations.map((a) => (
-        <SavedRect
-          key={a.id}
-          annotation={a}
-          canDelete={a.userId === myUserId}
-          onDelete={() => onDelete(a.id)}
-        />
-      ))}
+      {showSaved &&
+        annotations.map((a) => (
+          <SavedRect
+            key={a.id}
+            annotation={a}
+            canDelete={a.userId === myUserId}
+            onDelete={() => onDelete(a.id)}
+          />
+        ))}
       {/* In-progress drag preview */}
       {draft && (
         <div
