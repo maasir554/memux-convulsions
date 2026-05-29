@@ -159,41 +159,59 @@ export function VaultCitation({
 /* ----------------------------------------------------- capture pill */
 
 /**
- * Inline source affordance shown directly after a citation chip when the
- * cited section was indexed from a webpage capture. Renders a small
- * favicon + host pill; clicking opens the source screenshot in the
- * shared image modal with a "view source" link in the header.
+ * Inline source affordance shown directly after every citation chip
+ * whose cited section traces back to an image capture (PDF page, image
+ * file, worksmith webpage screenshot — any of them). Renders a small
+ * pill; clicking opens the source screenshot in the shared image modal.
  *
- * Renders nothing for non-section notes, non-capture sources, and
- * captures that don't have a sourceUrl persisted (old captures).
+ * Two label modes:
+ *   - Capture has a sourceUrl (worksmith webpage) → favicon + host
+ *   - No sourceUrl (PDF page / uploaded image) → source-page glyph + label
+ *
+ * Renders nothing for sections sourced from non-image origins (md, code,
+ * csv) or when the source row was deleted.
  */
 function CapturePill({ noteItemId }: { noteItemId: string }) {
   const { capture } = useSectionSourceCapture(noteItemId);
   const blobUrl = useBlobUrl(capture?.blobKey ?? undefined);
   const [modalOpen, setModalOpen] = useState(false);
 
-  if (!capture || !capture.sourceUrl) return null;
-  const host = parseHost(capture.sourceUrl);
-  if (!host) return null;
+  if (!capture) return null;
 
   const src = blobUrl ?? capture.src ?? null;
+  if (!src) return null;
+
+  const host = parseHost(capture.sourceUrl);
 
   return (
     <>
       <button
         type="button"
         onClick={() => setModalOpen(true)}
-        title={`Source: ${capture.sourceUrl}`}
+        title={
+          capture.sourceUrl
+            ? `Source: ${capture.sourceUrl}`
+            : `Source: ${capture.title}`
+        }
         className={cn(
           "ml-1 inline-flex items-center gap-1 rounded-md border border-border/60 bg-card/50 px-1.5 py-0.5 align-baseline",
           "text-[0.78em] leading-snug text-muted-foreground no-underline",
           "transition-colors hover:border-foreground/30 hover:bg-muted/60 hover:text-foreground",
         )}
       >
-        <Favicon host={host} className="size-3" />
-        <span className="max-w-[14ch] truncate">{host}</span>
+        {host ? (
+          <>
+            <Favicon host={host} className="size-3" />
+            <span className="max-w-[14ch] truncate">{host}</span>
+          </>
+        ) : (
+          <>
+            <FileBox className="size-3 text-rose-300/80" />
+            <span className="max-w-[14ch] truncate">source</span>
+          </>
+        )}
       </button>
-      {modalOpen && src && (
+      {modalOpen && (
         <ImageModal
           src={src}
           alt={capture.title}

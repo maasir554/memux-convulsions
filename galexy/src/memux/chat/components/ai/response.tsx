@@ -29,16 +29,39 @@ import { VaultOutlineEmbed } from "@/memux/chat/components/citations/VaultOutlin
  */
 const VAULT_HOST = "vault.local";
 
+// The widget schemes — order matters: longer prefixes first, otherwise
+// `vault:` would gobble `vault-concepts:` etc.
+const VAULT_SCHEMES: Array<[string, string]> = [
+  ["vault-timeline", "timeline"],
+  ["vault-concepts", "concepts"],
+  ["vault-outline", "outline"],
+  ["vault-image", "image"],
+  ["vault-graph", "graph"],
+  ["vault-chart", "chart"],
+  ["vault-table", "table"],
+  ["vault", "item"],
+];
+
 function rewriteCitationsForSanitizer(md: string): string {
-  return md
-    .replace(/]\(vault-image:([^)\s]+)\)/g, `](https://${VAULT_HOST}/image/$1)`)
-    .replace(/]\(vault-graph:([^)\s]+)\)/g, `](https://${VAULT_HOST}/graph/$1)`)
-    .replace(/]\(vault-concepts:([^)\s]+)\)/g, `](https://${VAULT_HOST}/concepts/$1)`)
-    .replace(/]\(vault-chart:([^)\s]+)\)/g, `](https://${VAULT_HOST}/chart/$1)`)
-    .replace(/]\(vault-timeline:([^)\s]+)\)/g, `](https://${VAULT_HOST}/timeline/$1)`)
-    .replace(/]\(vault-table:([^)\s]+)\)/g, `](https://${VAULT_HOST}/table/$1)`)
-    .replace(/]\(vault-outline:([^)\s]+)\)/g, `](https://${VAULT_HOST}/outline/$1)`)
-    .replace(/]\(vault:([^)\s]+)\)/g, `](https://${VAULT_HOST}/item/$1)`);
+  // The regex MUST allow whitespace in the URL position — chart/timeline/
+  // table/outline/concept specs frequently contain spaces in their labels
+  // ("BFSI Cybersecurity", "Section 02 · Overview"). Markdown's own image
+  // parser would bail on unescaped spaces, so we explicitly URL-encode
+  // the captured value before substituting in the fake vault.local URL.
+  // Without this, Streamdown sees `![alt](vault-concepts:A B,C D)` as
+  // invalid and renders it as literal text.
+  let out = md;
+  for (const [scheme, path] of VAULT_SCHEMES) {
+    const re = new RegExp(`\\]\\(${scheme}:([^)]+)\\)`, "g");
+    out = out.replace(re, (_, value) => {
+      // encodeURIComponent escapes spaces (%20), commas pass through.
+      // Decoded back in extractVaultWidget so widget parsers see the
+      // original characters.
+      const encoded = encodeURIComponent(String(value).trim());
+      return `](https://${VAULT_HOST}/${path}/${encoded})`;
+    });
+  }
+  return out;
 }
 
 /** Identify the widget kind from a (post-rewrite) vault.local URL. */
