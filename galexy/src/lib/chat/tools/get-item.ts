@@ -46,6 +46,9 @@ export async function getItem(input: GetItemInput): Promise<ToolResult> {
     summary: `Loaded "${row.title}" (${row.type}, ${row.content?.length ?? 0} chars${
       truncated ? ", truncated" : ""
     })`,
+    // Send the body to the model too, not just the UI — otherwise the
+    // model "loads" the item but has no body to reason against.
+    ...(bodyMd ? { body: bodyMd } : {}),
     refs: [
       {
         itemId: row.id,

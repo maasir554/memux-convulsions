@@ -108,6 +108,13 @@ export type ToolResult = {
   summary: string;
   /** Pointer-only candidates so the LLM can request depth via more calls. */
   refs: ItemRef[];
+  /**
+   * Full body content for read-tools (read_section, get_item, …). Search
+   * tools omit it. Sent to the LLM as the substantive payload — without
+   * this, "Studying section X" returns metadata only and the model can't
+   * extract specific facts from the body.
+   */
+  body?: string;
   /** Payload for the AgentPanel's tool-view renderer. */
   ui: ToolUIPayload;
 } | {

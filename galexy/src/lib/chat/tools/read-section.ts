@@ -38,9 +38,16 @@ export async function readSection(input: ReadSectionInput): Promise<ToolResult> 
     .from(items)
     .where(and(eq(items.folder, section.folder), like(items.title, "_manifest")));
 
+  // Cap at ~8KB so the model gets the full section without blowing context
+  // on the occasional giant note. Sections we've seen run ~2-4KB typically.
+  const rawBody = section.content ?? "";
+  const truncated = rawBody.length > 8000;
+  const body = truncated ? `${rawBody.slice(0, 8000)}\n\n…[truncated ${rawBody.length - 8000} chars]` : rawBody;
+
   return {
     ok: true,
-    summary: `Read "${section.title}" (${section.content?.length ?? 0} chars)`,
+    summary: `Read "${section.title}" (${rawBody.length} chars${truncated ? ", truncated to 8000" : ""})`,
+    body,
     refs: manifest
       ? [
           {

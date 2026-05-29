@@ -488,6 +488,11 @@ function toolResultForModel(result: ToolResult): unknown {
   return {
     ok: true,
     summary: result.summary,
+    // Substantive body (full markdown for read-tools). Without this, the
+    // model "studies" a section but only sees the indexer's high-level
+    // metadata summary — so specific stats / quotes / numbers in the body
+    // are invisible and the model says "the notes don't provide that".
+    ...(result.body ? { body: result.body } : {}),
     refs: result.refs.map((r) => ({
       itemId: r.itemId,
       title: r.title,
