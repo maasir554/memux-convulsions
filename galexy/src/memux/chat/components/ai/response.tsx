@@ -189,6 +189,25 @@ function unwrapCitationParens(md: string): string {
 }
 
 /**
+ * Strip terminal sentence-punctuation that sits immediately after a
+ * vault citation at the end of a line or paragraph. The chip + its
+ * block-level source preview push that lone "." onto its own line and
+ * it reads as a stray glyph below the card image. The end of the
+ * sentence is already clear from the chip + card visual boundary, so
+ * dropping the trailing dot/comma/semi-colon is a clean tidy-up.
+ *
+ * Carefully scoped: only applies when the punctuation is the last
+ * non-whitespace before a newline or end-of-input. Mid-sentence
+ * commas / colons stay (the lookahead requires whitespace + newline).
+ */
+function stripOrphanPunctAfterCitation(md: string): string {
+  return md.replace(
+    /(!?\[[^\]]*\]\(https:\/\/vault\.local\/[^)]+\))[.,;:]+(?=\s*(?:\n|$))/g,
+    "$1",
+  );
+}
+
+/**
  * Models often write quasi-headings like `**1. Appearance and Size**` on
  * their own line without a blank line above, which renders as inline bold
  * jammed against the paragraph. Promote any line that is *only* a bold span
@@ -214,8 +233,10 @@ export function Response({
   content: string;
   className?: string;
 }) {
-  const processed = unwrapCitationParens(
-    rewriteCitationsForSanitizer(promoteHeadings(content)),
+  const processed = stripOrphanPunctAfterCitation(
+    unwrapCitationParens(
+      rewriteCitationsForSanitizer(promoteHeadings(content)),
+    ),
   );
   return (
     <div
