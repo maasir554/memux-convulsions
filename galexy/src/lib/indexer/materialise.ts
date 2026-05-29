@@ -214,6 +214,8 @@ export async function materialiseSourceCapture(opts: {
   blobKey?: string | null;
   /** Optional packaged-asset URL (legacy / pre-shipped images). */
   src?: string | null;
+  /** Original web URL the capture was taken from (worksmith page URL). */
+  sourceUrl?: string | null;
   /** Source-file mime so the viewer picks the right renderer. */
   mimeType?: string;
 }): Promise<{ itemId: string; title: string }> {
@@ -235,6 +237,7 @@ export async function materialiseSourceCapture(opts: {
     updatedAt: new Date().toISOString().slice(0, 10),
     blobKey: opts.blobKey ?? undefined,
     src: opts.src ?? undefined,
+    sourceUrl: opts.sourceUrl ?? undefined,
     bboxes: [],
   };
   await insertItem(db, note);

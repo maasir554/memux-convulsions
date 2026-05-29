@@ -61,6 +61,7 @@ export type Note = {
   updatedAt: string; // ISO date
   links?: string[]; // explicit outgoing links (item ids) for non-markdown files
   src?: string; // public path for pre-shipped pdf / image / csv
+  sourceUrl?: string; // original web URL the item came from (capture page URL)
   blobKey?: string; // OPFS key for user-uploaded pdf / image binaries
   language?: string; // for code items
   childIds?: string[]; // for folder items

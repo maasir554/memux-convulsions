@@ -13,8 +13,10 @@ import { useEffect, useState } from "react";
 import { eq } from "drizzle-orm";
 
 import { getVaultDb } from "@/lib/db/vault-db";
-import { items } from "@/lib/db/schema";
+import { indexRuns, items, sections } from "@/lib/db/schema";
 import type { ItemType } from "@/lib/mock-notes";
+
+const CAPTURE_URL_RE = /^Captured from (.+)$/m;
 
 export type VaultItemLite = {
   id: string;
@@ -24,6 +26,7 @@ export type VaultItemLite = {
   summary: string;
   blobKey?: string | null;
   src?: string | null;
+  sourceUrl?: string | null;
 };
 
 const cache = new Map<string, VaultItemLite | null>();
@@ -75,6 +78,7 @@ export function useVaultItem(itemId: string | null | undefined): {
             summary: items.summary,
             blobKey: items.blobKey,
             src: items.src,
+            sourceUrl: items.sourceUrl,
           })
           .from(items)
           .where(eq(items.id, itemId));
@@ -96,4 +100,117 @@ export function useVaultItem(itemId: string | null | undefined): {
   }, [itemId]);
 
   return { item: state.item, loading: state.loading };
+}
+
+/**
+ * Given a section-note item id, resolve the source CAPTURE image that the
+ * section was indexed from (if any). Returns null for non-section notes,
+ * sections sourced from non-image origins (PDF/CSV/code/md), and for
+ * sections from images that don't have a sourceUrl (old captures + manual
+ * image uploads).
+ *
+ * Used by VaultCitation to render an inline "source" affordance under a
+ * citation chip whenever the note traces back to a webpage capture.
+ */
+export type SectionCapture = VaultItemLite & {
+  blobKey: string | null;
+  sourceUrl: string | null;
+};
+
+const captureCache = new Map<string, SectionCapture | null>();
+
+export function useSectionSourceCapture(noteItemId: string | null | undefined): {
+  capture: SectionCapture | null;
+  loading: boolean;
+} {
+  const [state, setState] = useState<{
+    forId: string | null | undefined;
+    capture: SectionCapture | null;
+    loading: boolean;
+  }>(() => {
+    if (!noteItemId) return { forId: noteItemId, capture: null, loading: false };
+    if (captureCache.has(noteItemId))
+      return { forId: noteItemId, capture: captureCache.get(noteItemId) ?? null, loading: false };
+    return { forId: noteItemId, capture: null, loading: true };
+  });
+
+  if (state.forId !== noteItemId) {
+    if (!noteItemId) {
+      setState({ forId: noteItemId, capture: null, loading: false });
+    } else if (captureCache.has(noteItemId)) {
+      setState({ forId: noteItemId, capture: captureCache.get(noteItemId) ?? null, loading: false });
+    } else {
+      setState({ forId: noteItemId, capture: null, loading: true });
+    }
+  }
+
+  useEffect(() => {
+    if (!noteItemId) return;
+    if (captureCache.has(noteItemId)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const db = await getVaultDb();
+        // sections row → sourceItemId → load the capture item if it's an image
+        const [section] = await db
+          .select({ sourceItemId: sections.sourceItemId, runId: sections.runId })
+          .from(sections)
+          .where(eq(sections.noteItemId, noteItemId));
+        if (!section) {
+          captureCache.set(noteItemId, null);
+          if (!cancelled) setState({ forId: noteItemId, capture: null, loading: false });
+          return;
+        }
+        const [row] = await db
+          .select({
+            id: items.id,
+            title: items.title,
+            type: items.type,
+            folder: items.folder,
+            summary: items.summary,
+            blobKey: items.blobKey,
+            src: items.src,
+            sourceUrl: items.sourceUrl,
+          })
+          .from(items)
+          .where(eq(items.id, section.sourceItemId));
+        if (!row || row.type !== "image") {
+          captureCache.set(noteItemId, null);
+          if (!cancelled) setState({ forId: noteItemId, capture: null, loading: false });
+          return;
+        }
+        // Lazy backfill: captures indexed before sourceUrl existed don't
+        // have it persisted. Fish it out of the run's prompt and write
+        // back so subsequent reads (and any other UI that reads the row)
+        // see it without re-parsing.
+        let sourceUrl = row.sourceUrl;
+        if (!sourceUrl) {
+          const [run] = await db
+            .select({ prompt: indexRuns.prompt })
+            .from(indexRuns)
+            .where(eq(indexRuns.id, section.runId));
+          const url = run?.prompt ? CAPTURE_URL_RE.exec(run.prompt)?.[1]?.trim() : undefined;
+          if (url) {
+            sourceUrl = url;
+            await db.update(items).set({ sourceUrl: url }).where(eq(items.id, row.id));
+          }
+        }
+        const value: SectionCapture = {
+          ...row,
+          type: row.type as ItemType,
+          sourceUrl,
+        };
+        captureCache.set(noteItemId, value);
+        if (!cancelled) setState({ forId: noteItemId, capture: value, loading: false });
+      } catch (err) {
+        console.warn("[vault-resolver] section capture lookup failed for", noteItemId, err);
+        if (!cancelled) setState({ forId: noteItemId, capture: null, loading: false });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [noteItemId]);
+
+  return { capture: state.capture, loading: state.loading };
 }

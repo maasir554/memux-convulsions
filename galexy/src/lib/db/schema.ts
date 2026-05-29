@@ -41,6 +41,13 @@ export const items = pgTable("items", {
   links: jsonb("links").$type<string[]>().notNull().default([]),
   language: text("language"),
   src: text("src"),
+  /**
+   * Original web URL the item came from. For capture-derived image items
+   * this is the page the screenshot was taken from; chat surfaces it as a
+   * "view source" affordance with the site's favicon. Null for items not
+   * sourced from the web.
+   */
+  sourceUrl: text("source_url"),
   blobKey: text("blob_key"),
   sheetMeta: jsonb("sheet_meta").$type<SheetMeta>(),
   pdfAnnotations: jsonb("pdf_annotations").$type<PdfAnnotation[]>(),
@@ -85,6 +92,7 @@ export const ITEMS_MIGRATIONS: readonly string[] = [
   `ALTER TABLE items ADD COLUMN IF NOT EXISTS sheet_meta jsonb;`,
   `ALTER TABLE items ADD COLUMN IF NOT EXISTS pdf_annotations jsonb;`,
   `ALTER TABLE items ADD COLUMN IF NOT EXISTS bboxes jsonb NOT NULL DEFAULT '[]'::jsonb;`,
+  `ALTER TABLE items ADD COLUMN IF NOT EXISTS source_url text;`,
 ];
 
 // ===========================================================================

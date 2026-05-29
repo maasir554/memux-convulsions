@@ -8,14 +8,13 @@
  * vault" link.
  */
 
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
-import Link from "next/link";
-import { ExternalLink, ImageOff, X } from "lucide-react";
+import { useState } from "react";
+import { ImageOff } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useBlobUrl } from "@/components/galexy/use-blob-url";
 import { useVaultItem } from "@/lib/chat/vault-resolver";
+import { ImageModal } from "./ImageModal";
 
 const PREVIEW_HEIGHT_PX = 200;
 
@@ -82,93 +81,11 @@ export function VaultImageEmbed({
           itemId={item.id}
           title={item.title}
           folder={item.folder}
+          sourceUrl={item.sourceUrl}
           onClose={() => setModalOpen(false)}
         />
       )}
     </>
-  );
-}
-
-/* ----------------------------------------------------- modal */
-
-function ImageModal({
-  src,
-  alt,
-  itemId,
-  title,
-  folder,
-  onClose,
-}: {
-  src: string;
-  alt: string;
-  itemId: string;
-  title: string;
-  folder: string;
-  onClose: () => void;
-}) {
-  // Lock body scroll + close on Escape while the modal is open.
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  if (typeof document === "undefined") return null;
-
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 backdrop-blur-sm"
-    >
-      <div
-        className="relative flex max-h-[92vh] max-w-[92vw] flex-col gap-3"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-3 rounded-t-lg bg-card/80 px-4 py-2 text-sm backdrop-blur">
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-semibold tracking-tight text-foreground">
-              {title}
-            </div>
-            {folder && (
-              <div className="truncate font-mono text-[10px] text-muted-foreground">
-                {folder}
-              </div>
-            )}
-          </div>
-          <Link
-            href={`/vault?open=${encodeURIComponent(itemId)}`}
-            className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-[11px] text-foreground/85 hover:border-foreground/30 hover:bg-muted/70"
-            onClick={onClose}
-          >
-            <ExternalLink className="size-3" />
-            Open in vault
-          </Link>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-md border border-border/60 bg-muted/40 p-1.5 text-muted-foreground hover:border-foreground/30 hover:bg-muted/70 hover:text-foreground"
-          >
-            <X className="size-3.5" />
-          </button>
-        </div>
-        <img
-          src={src}
-          alt={alt}
-          className="max-h-[80vh] max-w-[92vw] rounded-b-lg object-contain"
-        />
-      </div>
-    </div>,
-    document.body,
   );
 }
 

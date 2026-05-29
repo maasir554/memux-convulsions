@@ -31,10 +31,11 @@ import {
   Loader2,
 } from "lucide-react";
 
-import { useVaultItem } from "@/lib/chat/vault-resolver";
+import { useSectionSourceCapture, useVaultItem } from "@/lib/chat/vault-resolver";
 import { useBlobUrl } from "@/components/galexy/use-blob-url";
 import type { ItemType } from "@/lib/mock-notes";
 import { cn } from "@/lib/utils";
+import { Favicon, ImageModal, parseHost } from "./ImageModal";
 
 const ICON_BY_TYPE: Partial<Record<ItemType, React.ComponentType<{ className?: string }>>> = {
   markdown: FileText,
@@ -142,12 +143,65 @@ export function VaultCitation({
         <Icon className={cn("size-3 shrink-0", tint)} />
         <span className="truncate">{display}</span>
       </Link>
+      <CapturePill noteItemId={item.id} />
       {hoverOpen && anchorRect && (
         <SourcePreviewCard
           item={item}
           anchorRect={anchorRect}
           onMouseEnter={scheduleOpen}
           onMouseLeave={scheduleClose}
+        />
+      )}
+    </>
+  );
+}
+
+/* ----------------------------------------------------- capture pill */
+
+/**
+ * Inline source affordance shown directly after a citation chip when the
+ * cited section was indexed from a webpage capture. Renders a small
+ * favicon + host pill; clicking opens the source screenshot in the
+ * shared image modal with a "view source" link in the header.
+ *
+ * Renders nothing for non-section notes, non-capture sources, and
+ * captures that don't have a sourceUrl persisted (old captures).
+ */
+function CapturePill({ noteItemId }: { noteItemId: string }) {
+  const { capture } = useSectionSourceCapture(noteItemId);
+  const blobUrl = useBlobUrl(capture?.blobKey ?? undefined);
+  const [modalOpen, setModalOpen] = useState(false);
+
+  if (!capture || !capture.sourceUrl) return null;
+  const host = parseHost(capture.sourceUrl);
+  if (!host) return null;
+
+  const src = blobUrl ?? capture.src ?? null;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setModalOpen(true)}
+        title={`Source: ${capture.sourceUrl}`}
+        className={cn(
+          "ml-1 inline-flex items-center gap-1 rounded-md border border-border/60 bg-card/50 px-1.5 py-0.5 align-baseline",
+          "text-[0.78em] leading-snug text-muted-foreground no-underline",
+          "transition-colors hover:border-foreground/30 hover:bg-muted/60 hover:text-foreground",
+        )}
+      >
+        <Favicon host={host} className="size-3" />
+        <span className="max-w-[14ch] truncate">{host}</span>
+      </button>
+      {modalOpen && src && (
+        <ImageModal
+          src={src}
+          alt={capture.title}
+          itemId={capture.id}
+          title={capture.title}
+          folder={capture.folder}
+          sourceUrl={capture.sourceUrl}
+          onClose={() => setModalOpen(false)}
         />
       )}
     </>

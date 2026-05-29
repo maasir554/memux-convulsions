@@ -118,6 +118,11 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
   const { signal } = hooks;
   const runId = group.id;
   const userContext = group.prompt;
+  // Worksmith captures embed "Captured from <url>" in the prompt header
+  // (see use-worksmith-bridge.ts:buildPrompt). Lift it once so every
+  // capture item we materialise this run can carry the URL as a
+  // structured field — chat surfaces it as "view source" with favicon.
+  const captureSourceUrl = /^Captured from (.+)$/m.exec(userContext)?.[1]?.trim();
 
   // Empty group name → AI will name on completion. Use a stable provisional
   // name for the folder until then.
@@ -296,6 +301,7 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
               ordinal: captureOrdinal,
               blobKey: captureBlobKey,
               mimeType: extracted.mimeType ?? "image/png",
+              sourceUrl: captureSourceUrl,
             });
             sourceCaptureId = itemId;
           } catch (err) {
