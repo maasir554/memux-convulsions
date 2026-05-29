@@ -562,3 +562,43 @@
     ws-bbox-pop 520ms cubic-bezier(0.22, 0.61, 0.36, 1) both,
     ws-bbox-pulse 2200ms ease-in-out 520ms infinite;
 }
+
+/* ============================================================================
+ * Timeline widget — sequential progress reveal.
+ *
+ * The track's "drawn" segment grows from left to right over a fixed window
+ * (default 5s). Each event uses an inline animation-delay equal to its
+ * normalised position * the window — so the dot pops in exactly when the
+ * progress front reaches it, then the date/label drifts in just after.
+ *
+ * cubic-bezier(0.65, 0, 0.35, 1) gives a slight ease-in-ease-out which
+ * feels deliberate (not a constant march) without feeling mechanical.
+ * ========================================================================== */
+
+@keyframes ws-timeline-progress {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.ws-timeline-progress {
+  transform-origin: left center;
+  animation: ws-timeline-progress var(--ws-timeline-duration, 5s) cubic-bezier(0.65, 0, 0.35, 1) both;
+  will-change: transform;
+}
+
+@keyframes ws-timeline-dot-in {
+  0%   { opacity: 0; transform: scale(0); }
+  55%  { opacity: 1; transform: scale(1.45); box-shadow: 0 0 0 6px color-mix(in oklch, var(--primary) 28%, transparent); }
+  100% { opacity: 1; transform: scale(1);   box-shadow: 0 0 0 0px color-mix(in oklch, var(--primary) 0%, transparent); }
+}
+.ws-timeline-dot {
+  animation: ws-timeline-dot-in 460ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+
+@keyframes ws-timeline-meta-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ws-timeline-meta {
+  animation: ws-timeline-meta-in 360ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
