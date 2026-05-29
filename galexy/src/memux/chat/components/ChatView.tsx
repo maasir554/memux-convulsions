@@ -60,6 +60,7 @@ export function ChatView({
   // Persisted UI bits — right-pane visibility, token meter, KB default.
   // Sidebar collapse is owned by Sidebar.tsx end-to-end now.
   const agentPanelOpen = useClient((s) => s.agentPanelOpen);
+  const setAgentPanelOpen = useClient((s) => s.setAgentPanelOpen);
   const kbModeDefault = useClient((s) => s.kbModeDefault);
 
   // Per-chat KB (Vault) toggle. undefined → inherit the global default.
@@ -68,6 +69,10 @@ export function ChatView({
 
   const applyAgentEvent = useAgentStore((s) => s.apply);
   const resetAgent = useAgentStore((s) => s.reset);
+  const captureAgentSnapshot = useAgentStore((s) => s.captureSnapshot);
+  const enterViewMode = useAgentStore((s) => s.enterViewMode);
+  const exitViewMode = useAgentStore((s) => s.exitViewMode);
+  const attachAgentHistory = useStore((s) => s.attachAgentHistory);
 
   // Re-load models whenever the transport mode changes.
   const transportMode = useClient((s) => s.mode);
@@ -102,6 +107,20 @@ export function ChatView({
     consumePendingFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingFiles]);
+
+  // Click-to-add-concept: VaultConceptCloud pills dispatch this event
+  // when clicked. We append the concept to the current draft (with a
+  // separator) so the user can phrase a follow-up around it.
+  useEffect(() => {
+    function onAppend(e: Event) {
+      const detail = (e as CustomEvent<{ text: string }>).detail;
+      const text = (detail?.text ?? "").trim();
+      if (!text) return;
+      setDraft((cur) => (cur.trim() ? `${cur.trim()} ${text}` : text));
+    }
+    window.addEventListener("memux:compose-append", onAppend);
+    return () => window.removeEventListener("memux:compose-append", onAppend);
+  }, []);
 
   async function attachFiles(files: File[]) {
     const imgs = filterImages(files);
@@ -164,6 +183,13 @@ export function ChatView({
 
     if (kbMode) {
       resetAgent();
+      // Sending a new prompt always returns the panel to live mode —
+      // any past-turn snapshot the user might be viewing steps aside.
+      exitViewMode();
+      // Reveal the agent panel automatically on the first KB turn so
+      // the user sees the live activity stream the instant their query
+      // fires. No-op when already open — the setter is idempotent.
+      if (!agentPanelOpen) setAgentPanelOpen(true);
       const userText = parts.find((p) => p.type === "text");
       const question = userText?.type === "text" ? userText.text : "";
       await runChatTurn({
@@ -176,10 +202,16 @@ export function ChatView({
           if (event.kind === "synth-token") {
             appendText(assistantMsg.id, event.token);
           } else if (event.kind === "synth-done") {
+            // Capture the live agent state into the assistant message so
+            // the eye button can replay it later.
+            attachAgentHistory(assistantMsg.id, captureAgentSnapshot());
             finishMessage(assistantMsg.id);
             setIsStreaming(false);
           } else if (event.kind === "turn-error") {
             appendText(assistantMsg.id, `\n\n[error: ${event.error}]`);
+            // Even on error, snapshot what we have — partial activity
+            // is useful for the user to inspect what went wrong.
+            attachAgentHistory(assistantMsg.id, captureAgentSnapshot());
             finishMessage(assistantMsg.id);
             setIsStreaming(false);
           }
@@ -282,8 +314,8 @@ export function ChatView({
   }
 
   return (
-    <div className="flex-1 flex min-w-0">
-      <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Conversation>
           {active.messages.length === 0 ? (
             <ConversationEmptyState
@@ -303,6 +335,7 @@ export function ChatView({
                   role={m.role}
                   streaming={m.streaming}
                   isLatestUser={m.role === "user" && i === lastUserIdx}
+                  hasAgentHistory={!!m.agentHistory}
                   onDelete={() => deleteMessage(m.id)}
                   onRegenerate={
                     m.role === "assistant"
@@ -315,6 +348,14 @@ export function ChatView({
                   onEdit={
                     m.role === "user" && i === lastUserIdx
                       ? () => editUserMessage(m.id)
+                      : undefined
+                  }
+                  onViewAgent={
+                    m.role === "assistant" && m.agentHistory
+                      ? () => {
+                          enterViewMode(m.agentHistory!);
+                          if (!agentPanelOpen) setAgentPanelOpen(true);
+                        }
                       : undefined
                   }
                   parts={m.parts.map((p) =>
@@ -372,10 +413,13 @@ export function ChatView({
         <span hidden>{messageText({ id: "", role: "system", parts: [], createdAt: 0 })}</span>
       </div>
 
-      {/* Right-side agent panel — animates open/closed without unmounting. */}
+      {/* Right-side agent panel — animates open/closed without unmounting.
+          `min-h-0` is critical: without it the wrapper's flex layout lets
+          children grow past the parent's bounded height, which is what
+          made the panel "break" the page when many activity cards landed. */}
       <div
         className={cn(
-          "hidden md:flex shrink-0 overflow-hidden",
+          "hidden min-h-0 md:flex shrink-0 overflow-hidden",
           "transition-[width,min-width,max-width,border-left-width,opacity] duration-250 ease-out",
           agentPanelOpen
             ? "w-[40%] min-w-[360px] max-w-[640px] opacity-100"

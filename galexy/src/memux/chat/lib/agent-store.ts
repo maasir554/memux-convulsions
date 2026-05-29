@@ -11,20 +11,11 @@ import { create } from "zustand";
 import type {
   Candidate,
   ChatEvent,
-  ToolName,
-  ToolResult,
   ToolUIPayload,
 } from "@/lib/chat/types";
+import type { ActivityStep, AgentSnapshot } from "@/memux/chat/lib/agent-types";
 
-export type ActivityStep = {
-  stepId: string;
-  tool: ToolName;
-  args: unknown;
-  startedAt: number;
-  endedAt?: number;
-  result?: ToolResult;
-  status: "running" | "ok" | "error";
-};
+export type { ActivityStep, AgentSnapshot };
 
 type State = {
   turnId: string | null;
@@ -39,12 +30,24 @@ type State = {
   finalText: string;
   status: "idle" | "running" | "done" | "error";
   errorText: string | null;
+  /**
+   * When non-null, AgentPanel renders THIS snapshot instead of the live
+   * state. Set by clicking the eye button on a past assistant message;
+   * cleared by closing the snapshot or sending a new prompt.
+   */
+  viewingSnapshot: AgentSnapshot | null;
 };
 
 type Actions = {
   apply: (event: ChatEvent) => void;
   focusStep: (stepId: string | null) => void;
   reset: () => void;
+  /** Capture the current live state as a snapshot for archival. */
+  captureSnapshot: () => AgentSnapshot;
+  /** Switch the panel into "viewing a past turn" mode. */
+  enterViewMode: (snapshot: AgentSnapshot) => void;
+  /** Return the panel to live state. */
+  exitViewMode: () => void;
 };
 
 const initial: State = {
@@ -58,9 +61,10 @@ const initial: State = {
   finalText: "",
   status: "idle",
   errorText: null,
+  viewingSnapshot: null,
 };
 
-export const useAgentStore = create<State & Actions>((set) => ({
+export const useAgentStore = create<State & Actions>((set, get) => ({
   ...initial,
   apply(event) {
     switch (event.kind) {
@@ -131,6 +135,23 @@ export const useAgentStore = create<State & Actions>((set) => ({
   },
   reset() {
     set({ ...initial });
+  },
+  captureSnapshot() {
+    const s = get();
+    return {
+      steps: s.steps,
+      shortlist: s.shortlist,
+      reasoningStream: s.reasoningStream,
+      finalText: s.finalText,
+      capturedAt: Date.now(),
+      status: s.status === "error" ? "error" : ("done" as const),
+    };
+  },
+  enterViewMode(snapshot) {
+    set({ viewingSnapshot: snapshot });
+  },
+  exitViewMode() {
+    set({ viewingSnapshot: null });
   },
 }));
 

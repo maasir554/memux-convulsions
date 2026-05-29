@@ -36,6 +36,10 @@ import {
 import { listConcepts, getConcept, type ListConceptsInput, type GetConceptInput } from "@/lib/chat/tools/concepts";
 import { findImageRegion, type FindImageRegionInput } from "@/lib/chat/tools/find-image-region";
 import {
+  searchDocumentsTool,
+  type SearchDocumentsInput,
+} from "@/lib/chat/tools/search-documents";
+import {
   getSectionLinks,
   querySectionTree,
   type GetSectionLinksInput,
@@ -69,6 +73,20 @@ export const TOOLS: ToolDef[] = [
       required: ["query"],
     },
     handler: (input, _signal) => searchKeyword(input as SearchKeywordInput),
+  },
+  {
+    name: "search_documents",
+    description:
+      "BM25 full-text search across EVERY md / code / csv item in the vault — including notes the user never sent through the indexer. Use for natural-language word queries (multiple terms, paraphrases, typos OK). Distinct from search_keyword (exact substring, no ranking) and search_semantic (only indexed summaries; misses unindexed notes).",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Natural-language words / phrase to search for." },
+        limit: { type: "integer", minimum: 1, maximum: 30, description: "Max results (default 10)." },
+      },
+      required: ["query"],
+    },
+    handler: (input, _signal) => searchDocumentsTool(input as SearchDocumentsInput),
   },
   {
     name: "search_semantic",

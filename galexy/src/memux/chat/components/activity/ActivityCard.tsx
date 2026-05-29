@@ -68,6 +68,7 @@ const TONE_BY_TOOL: Record<ToolName, Tone> = {
   find_image_region: { iconTint: "text-violet-300", accent: "bg-violet-400/70", verb: "Locating", Icon: Target },
   get_section_links: { iconTint: "text-emerald-300", accent: "bg-emerald-400/70", verb: "Linking", Icon: Link2 },
   query_section_tree: { iconTint: "text-fuchsia-300", accent: "bg-fuchsia-400/70", verb: "Inspecting", Icon: Scan },
+  search_documents: { iconTint: "text-sky-300", accent: "bg-sky-400/70", verb: "Searching", Icon: Search },
 };
 
 /* ------------------------------------------------------------- card */
@@ -83,7 +84,16 @@ export function ActivityCard({
   const tone = TONE_BY_TOOL[step.tool] ?? TONE_BY_TOOL.search_combined;
   const Icon = tone.Icon;
   const running = step.status === "running";
-  const errored = step.status === "error";
+  // Distinguish a "duplicate" — the harness's intentional safety net
+  // when the model retries the same (tool, args) — from a genuine
+  // failure. The dedupe error message has a stable prefix we key off.
+  // Duplicates aren't alarming; they're the system working correctly.
+  const isDuplicateBlock =
+    step.status === "error" &&
+    !!step.result &&
+    !step.result.ok &&
+    step.result.error.startsWith("You already called");
+  const errored = step.status === "error" && !isDuplicateBlock;
 
   // Capped stagger: first ~6 cards stagger softly, later cards land
   // immediately (don't make the user wait if 12 things happened at once).
@@ -92,34 +102,28 @@ export function ActivityCard({
   return (
     <div
       className={cn(
-        "ws-card-enter group relative overflow-hidden rounded-xl border bg-card/50 backdrop-blur",
+        // `shrink-0` is critical inside the flex-column stream: without
+        // it every card shrinks below its content size to fit the parent
+        // when there are many siblings, collapsing the whole stream to
+        // a stack of thin bars instead of letting it overflow + scroll.
+        "ws-card-enter group relative shrink-0 overflow-hidden rounded-xl border bg-card/50 backdrop-blur",
         "border-border/50 transition-all duration-200",
         "hover:-translate-y-0.5 hover:border-foreground/25 hover:bg-card/70 hover:shadow-lg",
         errored && "border-destructive/40 bg-destructive/[0.04]",
+        // Duplicate-block cards intentionally read as muted/inert. They
+        // tell the user "the harness skipped this" without screaming.
+        isDuplicateBlock && "border-border/30 bg-card/20 opacity-60",
       )}
       style={{ animationDelay: `${delayMs}ms` }}
     >
-      {/* Left-edge accent strip — colour-codes the tool family at a glance. */}
-      <div
-        className={cn(
-          "absolute inset-y-0 left-0 w-[3px]",
-          running ? tone.accent : "bg-border/40",
-          running && "opacity-90",
-        )}
-        aria-hidden
-      />
-
-      <div className="flex flex-col gap-2 px-3.5 py-3 pl-4">
+      <div className="flex flex-col gap-2 px-3.5 py-3">
         {/* Header: icon + verb + dots + status */}
         <div className="flex items-center gap-2">
-          <div
-            className={cn(
-              "flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/40",
-              tone.iconTint,
-            )}
-          >
-            <Icon className="size-3.5" aria-hidden />
-          </div>
+          <Icon
+            className={cn("size-4 shrink-0", tone.iconTint)}
+            aria-hidden
+          />
+
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline gap-1 text-[13px] font-medium">
               {running ? (
@@ -137,6 +141,10 @@ export function ActivityCard({
           ) : errored ? (
             <span className="shrink-0 text-[10px] uppercase tracking-wider text-destructive/80">
               error
+            </span>
+          ) : isDuplicateBlock ? (
+            <span className="shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+              skipped
             </span>
           ) : null}
         </div>

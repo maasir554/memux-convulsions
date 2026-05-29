@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Check,
   Copy,
+  Eye,
   MoreHorizontal,
   Pencil,
   RefreshCw,
@@ -29,20 +30,26 @@ export function Message({
   parts,
   streaming,
   isLatestUser,
+  hasAgentHistory,
   onDelete,
   onRegenerate,
   onCopy,
   onEdit,
+  onViewAgent,
 }: {
   role: ChatRole;
   parts: DisplayPart[];
   streaming?: boolean;
   /** Only the most recent user bubble gets the edit-3-dot UI. */
   isLatestUser?: boolean;
+  /** True if this assistant message has a captured agent snapshot. */
+  hasAgentHistory?: boolean;
   onDelete?: () => void;
   onRegenerate?: () => void;
   onCopy?: () => void;
   onEdit?: () => void;
+  /** Open this message's agent history in the right panel. */
+  onViewAgent?: () => void;
 }) {
   const isUser = role === "user";
 
@@ -121,11 +128,12 @@ export function Message({
       </div>
 
       {/* Assistant: inline icon row below the message. */}
-      {!isUser && !streaming && (onRegenerate || onCopy || onDelete) && (
+      {!isUser && !streaming && (onRegenerate || onCopy || onDelete || (hasAgentHistory && onViewAgent)) && (
         <AssistantActionRow
           onRegenerate={onRegenerate}
           onCopy={onCopy}
           onDelete={onDelete}
+          onViewAgent={hasAgentHistory ? onViewAgent : undefined}
         />
       )}
     </div>
@@ -138,10 +146,12 @@ function AssistantActionRow({
   onRegenerate,
   onCopy,
   onDelete,
+  onViewAgent,
 }: {
   onRegenerate?: () => void;
   onCopy?: () => void;
   onDelete?: () => void;
+  onViewAgent?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -176,6 +186,13 @@ function AssistantActionRow({
               <Copy className="size-3.5" />
             )
           }
+        />
+      )}
+      {onViewAgent && (
+        <ActionIconButton
+          label="View agent history"
+          onClick={onViewAgent}
+          icon={<Eye className="size-3.5" />}
         />
       )}
       {onDelete && (

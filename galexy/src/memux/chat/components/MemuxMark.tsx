@@ -3,11 +3,15 @@
  * fractal-noise overlay and a soft inner rim. Used in the chat header
  * + wherever the MEMUX wordmark appears.
  *
- * The filter + gradient ids are suffixed so the same SVG can be
- * inlined more than once on a page without collisions.
+ * The filter + gradient ids are derived from `useId()` so each instance
+ * has a unique id AND the same id across SSR + hydration. A previous
+ * implementation used a module-level counter, which is NOT stable
+ * across SSR (server starts at 1, client may have already advanced to
+ * 2 by the time hydration runs), causing the "tree hydrated but some
+ * attributes didn't match" console error during fast navigation.
  */
 
-let markIdCounter = 0;
+import { useId } from "react";
 
 export function MemuxMark({
   size = 22,
@@ -16,7 +20,11 @@ export function MemuxMark({
   size?: number;
   className?: string;
 }) {
-  const id = `memux-mark-${++markIdCounter}`;
+  // useId returns "<R:...>"-style ids which contain `:` — fine for
+  // HTML id attributes but breaks `url(#...)` selectors in some
+  // engines. Strip the colons to keep both happy.
+  const rawId = useId();
+  const id = `memux-mark-${rawId.replace(/:/g, "")}`;
   return (
     <svg
       width={size}

@@ -211,15 +211,21 @@ export function PromptInput({
         <div className="flex-1" />
 
         {isStreaming ? (
-          <Button
-            size="icon"
-            variant="destructive"
-            className="rounded-full size-8"
+          // Dark-on-foreground rounded button with a red glyph inside.
+          // Reads as "halt" without the full-red urgency of a destructive
+          // button — fits a streaming-cancel action better.
+          <button
+            type="button"
             onClick={onStop}
             aria-label="Stop"
+            className={cn(
+              "flex size-8 items-center justify-center rounded-full border border-border bg-foreground/[0.06]",
+              "text-destructive transition-colors",
+              "hover:bg-foreground/10 hover:text-destructive",
+            )}
           >
-            <Square className="!h-3 !w-3 fill-current" />
-          </Button>
+            <Square className="size-3 fill-current" />
+          </button>
         ) : (
           <Button
             size="icon"

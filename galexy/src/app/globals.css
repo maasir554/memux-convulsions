@@ -445,3 +445,22 @@
   width: var(--ws-typing-chars, 100%);
   animation: ws-typing-reveal var(--ws-typing-duration, 1.4s) steps(40, end) both;
 }
+
+/* Bbox overlay: scale-in from centre, hold, then a soft pulsing glow.
+   Used in the markdown-view BboxModal so the highlighted region
+   "lands" with a brief flourish when the modal opens. */
+@keyframes ws-bbox-pop {
+  0%   { opacity: 0; transform: scale(1.18); filter: drop-shadow(0 0 0 transparent); }
+  60%  { opacity: 1; transform: scale(0.98); }
+  100% { opacity: 1; transform: scale(1);     filter: drop-shadow(0 0 6px color-mix(in oklch, var(--primary) 40%, transparent)); }
+}
+@keyframes ws-bbox-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 22%, transparent), inset 0 0 0 9999px color-mix(in oklch, black 55%, transparent); }
+  50%      { box-shadow: 0 0 0 8px color-mix(in oklch, var(--primary) 32%, transparent), inset 0 0 0 9999px color-mix(in oklch, black 55%, transparent); }
+}
+.ws-bbox-pop {
+  transform-origin: center;
+  animation:
+    ws-bbox-pop 520ms cubic-bezier(0.22, 0.61, 0.36, 1) both,
+    ws-bbox-pulse 2200ms ease-in-out 520ms infinite;
+}

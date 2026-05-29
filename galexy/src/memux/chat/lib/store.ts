@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import type { AgentSnapshot } from "@/memux/chat/lib/agent-types";
+
 export type ChatRole = "system" | "user" | "assistant";
 
 export type ContentPart =
@@ -13,6 +15,13 @@ export type ChatMessage = {
   parts: ContentPart[];
   streaming?: boolean;
   createdAt: number;
+  /**
+   * Frozen agent activity stream + shortlist captured at the moment this
+   * assistant message finished. Only set on assistant messages that came
+   * from a KB-mode turn. Powers the "eye" button in the message hover
+   * tray — clicking it re-opens the agent panel with this snapshot.
+   */
+  agentHistory?: AgentSnapshot;
 };
 
 export type ChatSession = {
@@ -64,6 +73,11 @@ type State = {
    * after it before putting the text back into the composer).
    */
   removeMessagesFrom: (messageId: string) => void;
+  /**
+   * Attach a frozen agent snapshot to an assistant message — called at
+   * turn-done so the user can re-open the activity stream later.
+   */
+  attachAgentHistory: (messageId: string, history: AgentSnapshot) => void;
 };
 
 export function newId(): string {
@@ -252,6 +266,23 @@ export const useStore = create<State>()(
               updatedAt: Date.now(),
             };
           }),
+        }));
+      },
+
+      attachAgentHistory: (messageId, history) => {
+        const id = get().activeId;
+        if (!id) return;
+        set((s) => ({
+          chats: s.chats.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) =>
+                    m.id === messageId ? { ...m, agentHistory: history } : m,
+                  ),
+                }
+              : c,
+          ),
         }));
       },
     }),

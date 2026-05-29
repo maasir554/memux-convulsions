@@ -32,10 +32,20 @@ export function CardPreview({ step }: { step: ActivityStep }) {
     return <RunningPreview step={step} />;
   }
   if (!step.result?.ok) {
+    const errText = step.result && !step.result.ok ? step.result.error : "Failed.";
+    const isDuplicate = errText.startsWith("You already called");
+    // For duplicates, show a tight neutral one-liner instead of the
+    // full nag. The agent treats this as routine; the user shouldn't
+    // see a wall of red text either.
+    if (isDuplicate) {
+      return (
+        <div className="text-[11px] italic text-muted-foreground/70">
+          Repeat call — already returned above.
+        </div>
+      );
+    }
     return (
-      <div className="text-[11px] italic text-destructive/80">
-        {step.result && !step.result.ok ? step.result.error : "Failed."}
-      </div>
+      <div className="text-[11px] italic text-destructive/80">{errText}</div>
     );
   }
   return <RenderPayload payload={step.result.ui} />;
@@ -147,9 +157,19 @@ function SearchResultsPreview({
   payload: Extract<ToolUIPayload, { kind: "search-results" }>;
 }) {
   const top = payload.results.slice(0, 5);
+
+  // Empty-result case: still surface the query so the user can see WHAT
+  // was searched (otherwise a card that just reads "No results." gives
+  // them no signal at all about what the agent tried).
   if (top.length === 0) {
-    return <div className="text-[11px] italic text-muted-foreground">No results.</div>;
+    return (
+      <div className="text-[11px] text-muted-foreground">
+        <span className="italic">&ldquo;{payload.query}&rdquo;</span>{" "}
+        <span className="text-muted-foreground/60">· no results</span>
+      </div>
+    );
   }
+
   return (
     <div className="flex flex-col gap-1.5">
       <div className="truncate text-[11px] text-muted-foreground">
@@ -157,11 +177,15 @@ function SearchResultsPreview({
         <span className="text-muted-foreground/60">· {payload.results.length} hits</span>
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {top.map((r) => (
+        {top.map((r, i) => (
           <div
             key={r.itemId}
             title={r.snippet || r.title}
-            className="flex max-w-full items-center gap-1.5 rounded-md border border-border/50 bg-muted/30 px-1.5 py-1 text-[11px]"
+            // Per-chip stagger entrance — same ws-card-enter keyframe the
+            // outer card uses, just smaller delays so a wave of chips
+            // cascades in instead of popping all at once.
+            className="ws-card-enter flex max-w-full items-center gap-1.5 rounded-md border border-border/50 bg-muted/30 px-1.5 py-1 text-[11px]"
+            style={{ animationDelay: `${60 + i * 70}ms` }}
           >
             <ItemIconForType type={r.type} />
             <span className="max-w-[18ch] truncate font-medium text-foreground/85">
@@ -170,7 +194,10 @@ function SearchResultsPreview({
           </div>
         ))}
         {payload.results.length > top.length && (
-          <span className="self-center text-[10px] text-muted-foreground/60">
+          <span
+            className="ws-card-enter self-center text-[10px] text-muted-foreground/60"
+            style={{ animationDelay: `${60 + top.length * 70}ms` }}
+          >
             +{payload.results.length - top.length} more
           </span>
         )}

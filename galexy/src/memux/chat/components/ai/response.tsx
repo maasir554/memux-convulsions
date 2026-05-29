@@ -5,6 +5,12 @@ import type { Components } from "streamdown";
 import { cn } from "@/memux/chat/lib/utils";
 import { VaultCitation } from "@/memux/chat/components/citations/VaultCitation";
 import { VaultImageEmbed } from "@/memux/chat/components/citations/VaultImageEmbed";
+import { VaultGraphEmbed } from "@/memux/chat/components/citations/VaultGraphEmbed";
+import { VaultConceptCloud } from "@/memux/chat/components/citations/VaultConceptCloud";
+import { VaultChartEmbed } from "@/memux/chat/components/citations/VaultChartEmbed";
+import { VaultTimelineEmbed } from "@/memux/chat/components/citations/VaultTimelineEmbed";
+import { VaultTableEmbed } from "@/memux/chat/components/citations/VaultTableEmbed";
+import { VaultOutlineEmbed } from "@/memux/chat/components/citations/VaultOutlineEmbed";
 
 /**
  * The agent emits citations as `vault:<itemId>` and `vault-image:<itemId>`
@@ -26,39 +32,72 @@ const VAULT_HOST = "vault.local";
 function rewriteCitationsForSanitizer(md: string): string {
   return md
     .replace(/]\(vault-image:([^)\s]+)\)/g, `](https://${VAULT_HOST}/image/$1)`)
+    .replace(/]\(vault-graph:([^)\s]+)\)/g, `](https://${VAULT_HOST}/graph/$1)`)
+    .replace(/]\(vault-concepts:([^)\s]+)\)/g, `](https://${VAULT_HOST}/concepts/$1)`)
+    .replace(/]\(vault-chart:([^)\s]+)\)/g, `](https://${VAULT_HOST}/chart/$1)`)
+    .replace(/]\(vault-timeline:([^)\s]+)\)/g, `](https://${VAULT_HOST}/timeline/$1)`)
+    .replace(/]\(vault-table:([^)\s]+)\)/g, `](https://${VAULT_HOST}/table/$1)`)
+    .replace(/]\(vault-outline:([^)\s]+)\)/g, `](https://${VAULT_HOST}/outline/$1)`)
     .replace(/]\(vault:([^)\s]+)\)/g, `](https://${VAULT_HOST}/item/$1)`);
 }
 
-/**
- * Pull the vault item id out of a URL the renderer thinks points at a
- * vault citation/embed. Accepts any of:
- *   • https://vault.local/item/<id>          (post-rewrite text citation)
- *   • https://vault.local/image/<id>         (post-rewrite image embed)
- *   • https://vault.local/<anything>/<id>    (defensive — model variants)
- *   • vault:<id>                             (raw, pre-rewrite)
- *   • vault-image:<id>                       (raw, pre-rewrite)
- *
- * We intentionally do NOT distinguish citation vs. embed by the URL path
- * — that decision is driven by the markdown element type (`<a>` → cite,
- * `<img>` → embed) at the call site. Letting the URL drive that choice
- * was load-bearing on the model getting the scheme exactly right, which
- * isn't a guarantee we can rely on. Now ANY vault.local URL with a path
- * segment after the host returns its id.
- */
-function extractVaultId(url: string): string | null {
+/** Identify the widget kind from a (post-rewrite) vault.local URL. */
+type VaultWidget =
+  | { kind: "item"; value: string }
+  | { kind: "image"; value: string }
+  | { kind: "graph"; value: string }
+  | { kind: "concepts"; value: string }
+  | { kind: "chart"; value: string }
+  | { kind: "timeline"; value: string }
+  | { kind: "table"; value: string }
+  | { kind: "outline"; value: string };
+
+const EMBED_KINDS = new Set([
+  "image",
+  "graph",
+  "concepts",
+  "chart",
+  "timeline",
+  "table",
+  "outline",
+]);
+
+function extractVaultWidget(url: string): VaultWidget | null {
   try {
     const u = new URL(url);
     if (u.host === VAULT_HOST) {
-      const m = u.pathname.match(/^\/[^/]+\/(.+)$/);
-      if (m) return decodeURIComponent(m[1]);
+      const m = u.pathname.match(/^\/([^/]+)\/(.+)$/);
+      if (m) {
+        const kind = m[1];
+        const value = decodeURIComponent(m[2]);
+        if (EMBED_KINDS.has(kind)) {
+          return { kind: kind as Exclude<VaultWidget, { kind: "item" }>["kind"], value };
+        }
+        return { kind: "item", value };
+      }
     }
   } catch {
-    // Not an absolute URL — fall through to direct-scheme checks below.
+    // Not absolute — fall through to raw-scheme checks.
   }
-  if (url.startsWith("vault:")) return url.slice("vault:".length);
-  if (url.startsWith("vault-image:")) return url.slice("vault-image:".length);
+  // Raw schemes (pre-rewrite). Order matters — longer prefixes first.
+  const rawMatchers: Array<[string, VaultWidget["kind"]]> = [
+    ["vault-timeline:", "timeline"],
+    ["vault-concepts:", "concepts"],
+    ["vault-outline:", "outline"],
+    ["vault-chart:", "chart"],
+    ["vault-graph:", "graph"],
+    ["vault-image:", "image"],
+    ["vault-table:", "table"],
+    ["vault:", "item"],
+  ];
+  for (const [prefix, kind] of rawMatchers) {
+    if (url.startsWith(prefix)) {
+      return { kind, value: url.slice(prefix.length) } as VaultWidget;
+    }
+  }
   return null;
 }
+
 
 /**
  * Custom renderers for the two citation schemes the agent emits:
@@ -69,12 +108,11 @@ function extractVaultId(url: string): string | null {
  */
 const citationComponents: Components = {
   a({ href, children, ...rest }) {
-    // Markdown `[…](…)` → text citation. Any vault.local URL or raw
-    // vault: / vault-image: scheme resolves to a VaultCitation chip;
-    // the path subkind (item / image / etc.) is ignored deliberately.
-    const id = typeof href === "string" ? extractVaultId(href) : null;
-    if (id) {
-      return <VaultCitation itemId={id} display={children} />;
+    // `[…](…)` → text citation. Always routes to VaultCitation regardless
+    // of which subkind the model used; the path is the value.
+    const w = typeof href === "string" ? extractVaultWidget(href) : null;
+    if (w) {
+      return <VaultCitation itemId={w.value} display={children} />;
     }
     return (
       <a href={href} {...rest}>
@@ -83,17 +121,26 @@ const citationComponents: Components = {
     );
   },
   img({ src, alt, ...rest }) {
-    // Markdown `![…](…)` → inline embed. Same URL forms accepted; same
-    // subkind-agnostic logic. If the resolved item isn't an image the
-    // embed component shows the themed broken-image fallback.
-    const id = typeof src === "string" ? extractVaultId(src) : null;
-    if (id) {
-      return (
-        <VaultImageEmbed
-          itemId={id}
-          alt={typeof alt === "string" ? alt : ""}
-        />
-      );
+    // `![…](…)` → inline embed. The path subkind picks which widget:
+    //   /graph/    → VaultGraphEmbed (mini knowledge graph)
+    //   /concepts/ → VaultConceptCloud
+    //   /chart/    → VaultChartEmbed (bar / pie / donut / line / area)
+    //   /timeline/ → VaultTimelineEmbed (horizontal chronology)
+    //   /table/    → VaultTableEmbed (side-by-side comparison)
+    //   /outline/  → VaultOutlineEmbed (hierarchical with reads marked)
+    //   /image/    → VaultImageEmbed
+    //   /item/     → VaultImageEmbed (handles the not-an-image case
+    //                gracefully — falls back to the themed broken state)
+    const w = typeof src === "string" ? extractVaultWidget(src) : null;
+    if (w) {
+      const altText = typeof alt === "string" ? alt : "";
+      if (w.kind === "graph") return <VaultGraphEmbed ids={w.value} alt={altText} />;
+      if (w.kind === "concepts") return <VaultConceptCloud concepts={w.value} alt={altText} />;
+      if (w.kind === "chart") return <VaultChartEmbed spec={w.value} alt={altText} />;
+      if (w.kind === "timeline") return <VaultTimelineEmbed spec={w.value} alt={altText} />;
+      if (w.kind === "table") return <VaultTableEmbed spec={w.value} alt={altText} />;
+      if (w.kind === "outline") return <VaultOutlineEmbed spec={w.value} alt={altText} />;
+      return <VaultImageEmbed itemId={w.value} alt={altText} />;
     }
     return <img src={src} alt={alt ?? ""} {...rest} />;
   },

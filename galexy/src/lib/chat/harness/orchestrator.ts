@@ -65,7 +65,11 @@ Tools are how you find and read content. The user has indexed their captures int
 
 Strategy:
 - Decompose the user's question first. Identify named entities, conceptual queries, date constraints.
-- Cast a wide net early: run search_semantic AND search_keyword in parallel waves when the question is rich. Use search_keyword for proper nouns / exact phrases, search_semantic for conceptual paraphrases.
+- Cast a wide net early. The three search tools cover three different intents — use them in parallel when the question is rich:
+    • search_documents — BM25 over EVERY md/code/csv body, including notes the user never indexed. Use for natural-language word queries, multi-term phrases, typo-tolerant lookups, and "find me notes that mention X". This is your best general-purpose search across raw vault content.
+    • search_semantic — vector search over INDEXED section summaries / questions / concepts. Use for conceptual / paraphrased queries where the user is asking about a TOPIC that's been through the indexer.
+    • search_keyword — exact substring match, no ranking. Use only for proper nouns the user typed verbatim, code symbols, or file names.
+  When the user asks something like "what do my notes say about X" or "find notes about Y", search_documents is usually the right first call. Reach for search_semantic when the user is asking about indexed/captured content specifically.
 - After search, pick the most promising candidates by score + topic fit and use get_item / read_section to read their content in depth.
 - If a search returns nothing useful, say so plainly. Don't pretend to have evidence you couldn't find.
 - Keep your visible reasoning short — 1-2 sentences before each tool wave. The final answer should be substantive but not padded.
@@ -88,12 +92,49 @@ The choice between the two schemes below is NOT about the item's type. It's abou
 
   Side-by-side: if you both want to embed the image AND reference it textually later, do both — they're not mutually exclusive.
 
+WIDGETS — beyond text + images, two structured widgets are available. Each renders as a real interactive component inline in the chat. Use them deliberately, NOT as decoration.
+
+  • Knowledge graph — ![label](vault-graph:id1,id2,id3)
+    Renders a small inline node-graph of vault items with edges drawn between items that share concepts or link to each other. Use ONCE per answer, ONLY when you've drawn from 3+ distinct items with meaningful relationships. Comma-separated itemIds in order of importance — the first appears at the centre. Cap at ~10 items.
+    Example:
+      ![Items behind this answer](vault-graph:idx-section-abc,idx-section-def,idx-capture-9c1a,idx-section-ghi)
+
+  • Concept cloud — ![label](vault-concepts:term1,term2,term3)
+    A pill cloud of the most relevant concepts surfaced by your search. Each pill is clickable — the user taps to insert it into the composer for a follow-up. Use ONCE at the end of answers that exposed a rich concept landscape. 6-15 terms is the sweet spot. Concepts are PLAIN WORDS, not itemIds — use natural English phrases ("retrieval-augmented generation", "vector embeddings", "BM25"). Most important first.
+    Example:
+      ![Related concepts](vault-concepts:retrieval-augmented generation,vector embeddings,BM25,reciprocal rank fusion)
+
+  • Chart — ![title](vault-chart:<type>,label1:value1,label2:value2,…)
+    Supported types: bar, pie, donut, line, area. Use when you have actual numeric data to visualise. Pie/donut for proportional breakdowns ("storage by category"), bar for comparisons across categories ("hits by source"), line/area for time series. 3-8 data points is the sweet spot — fewer feels sparse, more crowds the SVG. Labels are PLAIN TEXT. Values are NUMBERS only (no units).
+    Example:
+      ![Concept coverage](vault-chart:pie,Embeddings:120,Retrieval:80,Ranking:55,RRF:30)
+      ![Daily notes captured](vault-chart:line,Mon:3,Tue:7,Wed:5,Thu:12,Fri:8,Sat:2,Sun:1)
+      ![Storage by type](vault-chart:donut,Captures:340,Indexed:120,Misc:80)
+
+  • Timeline — ![title](vault-timeline:label1@YYYY-MM-DD,label2@YYYY-MM-DD,…)
+    Horizontal chronology with positioned dots. Each entry is "<label>@<ISO date>", optionally with "#<itemId>" suffix to make the dot link to a vault item. Use when the answer involves dated events spanning days/weeks/months. 3-8 events. Auto-sorts chronologically.
+    Example:
+      ![Project milestones](vault-timeline:Spec landed@2026-01-12,Prototype@2026-02-03#idx-capture-9c1a,Demo build@2026-03-01,Hackathon@2026-03-15)
+
+  • Comparison table — ![title](vault-table:col1|col2|col3||row1c1|row1c2|row1c3||row2c1|row2c2|row2c3)
+    "||" between rows, "|" between cells. First row is headers. Numeric columns are auto-detected and right-aligned. Use when answering "how do X and Y compare" or summarising 2-5 related items side by side. Up to 6 columns, up to 8 rows.
+    Example:
+      ![Search tools compared](vault-table:Tool|Coverage|Ranking|Best for||search_keyword|All vault|None|Exact substrings||search_documents|All vault|BM25|Natural-language words||search_semantic|Indexed only|Vector cosine|Conceptual paraphrases)
+
+  • Section outline — ![title](vault-outline:level-Text,~level-Text,…)
+    Hierarchical doc outline. Each entry is "<level>-<text>", level 1-6. Prefix an entry with "~" to mark "I read this" — those rows are highlighted. Use when your answer drew from one big multi-section doc and you want to show which slices you consulted.
+    Example:
+      ![MEMUX architecture](vault-outline:1-Overview,2-Stack,~2-Indexer pipeline,~3-Visioner,3-Summariser,~3-Embedder,2-Chat harness,~3-Tool registry)
+
+  When to skip widgets: simple answers, conversational replies, or answers that genuinely only cited 1-2 items. Widgets earn their visual weight.
+
 Rules:
 - NEVER fabricate an itemId. Only cite IDs you have literally seen in a refs[] array from a tool result this turn.
 - Prefer text citations sprinkled inline through the prose, not bunched at the end. One per claim is plenty.
 - Use image embeds sparingly — only when an actual image item answers the question visually. Don't embed images just to fill space.
+- Widgets at most ONE of each per answer. They're closing flourishes, not headers.
 - If your answer doesn't rely on the vault (e.g. clarifying a general concept), no citations needed.
-- Never put a vault-image: URL inside a [..]() link — that's always wrong. Inline images use ![..](), text links use [..](). The reverse — vault: URLs inside ![]() — is also wrong, but less harmful.`;
+- Never put a vault-image: / vault-graph: / vault-concepts: / vault-chart: / vault-timeline: / vault-table: / vault-outline: URL inside a [..]() link — those are embeds, not text citations. Use ![..](). Plain vault: links use [..]().`;
 
 /* --------------------------------------------------------- orchestrator */
 
@@ -107,7 +148,15 @@ export type RunChatTurnArgs = {
   onEvent: (event: ChatEvent) => void;
 };
 
-const MAX_TURNS = 12;
+/**
+ * Hard cap on per-question tool waves before we force a tool-less
+ * synthesis turn. 60 gives genuinely agentic workflows (deep multi-
+ * section research, cross-referencing concepts, region-finding in
+ * multiple images, etc.) the room they need to converge naturally.
+ * When the cap fires we coerce a final answer rather than erroring —
+ * the user always gets a response.
+ */
+const MAX_TURNS = 60;
 
 export async function runChatTurn(args: RunChatTurnArgs): Promise<void> {
   const turnId = `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -121,6 +170,24 @@ export async function runChatTurn(args: RunChatTurnArgs): Promise<void> {
     ...(args.recentHistory ?? []),
     { role: "user", parts: [{ text: args.question }] },
   ];
+
+  // Per-turn dedupe: track every (tool, args) tuple the model has called
+  // this turn. A repeat tells the model "you already ran this; pick a
+  // different action" instead of silently letting it loop — which is
+  // how a confused Gemini ends up calling read_section("X") 30 times.
+  //
+  // BUT: Gemini also routinely IGNORES our error and calls the same tool
+  // again on the next loop iteration. So the polite-error path isn't
+  // enough on its own. We also count cumulative duplicate hits and the
+  // shape of each turn; if the model has clearly stopped making
+  // progress, we hard-escape to a tool-less synthesis turn so the user
+  // gets an answer.
+  const callsSeen = new Map<string, number>();
+  const MAX_REPEAT_PER_KEY = 1; // first call is free; the next is rejected
+  /** Cumulative count of (tool, args) tuples we blocked this turn. */
+  let totalDuplicates = 0;
+  /** When this many cumulative duplicates fire, give up on the loop. */
+  const DUPLICATE_HARD_LIMIT = 4;
 
   try {
     for (let step = 0; step < MAX_TURNS; step++) {
@@ -152,8 +219,55 @@ export async function runChatTurn(args: RunChatTurnArgs): Promise<void> {
       // Dispatch every function call from this turn in parallel, then feed
       // every response back in a single user-role turn — Gemini accepts
       // multiple `functionResponse` parts per content block.
+      //
+      // Each call goes through the dedupe gate first: if the same
+      // (tool, args) tuple has already fired this turn, we short-circuit
+      // with an `ok: false` result whose error tells the model exactly
+      // what to do differently. This kills the read_section-on-loop
+      // pathology before the LLM can spend any more budget on it.
       const responses: NativePart[] = [];
+      let calledFreshThisTurn = 0;
+      let duplicatesThisTurn = 0;
       for (const call of turn.functionCalls) {
+        const callKey = `${call.name}:${stableArgsKey(call.args)}`;
+        const seenCount = callsSeen.get(callKey) ?? 0;
+        if (seenCount >= MAX_REPEAT_PER_KEY) {
+          duplicatesThisTurn++;
+          totalDuplicates++;
+          // Tell the model AND emit an explicit tool-result event so the
+          // user sees something happened. The result.ui is a tiny
+          // search-results payload pointing at nothing so the card
+          // renders cleanly.
+          const stepId = `step-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+          const dupResult: ToolResult = {
+            ok: false,
+            error: `You already called ${call.name} with these exact arguments earlier this turn. Don't repeat the same call — either pick a DIFFERENT tool, use DIFFERENT arguments (e.g. a different itemId / different query / different folder), or write your final answer using what you have. Repeating the same call won't yield new information.`,
+          };
+          args.onEvent({
+            kind: "tool-start",
+            turnId,
+            stepId,
+            tool: call.name as ToolName,
+            args: call.args,
+          });
+          args.onEvent({
+            kind: "tool-result",
+            turnId,
+            stepId,
+            tool: call.name as ToolName,
+            result: dupResult,
+          });
+          responses.push({
+            functionResponse: {
+              name: call.name,
+              response: toolResultForModel(dupResult),
+            },
+          });
+          continue;
+        }
+        callsSeen.set(callKey, seenCount + 1);
+        calledFreshThisTurn++;
+
         const result = await dispatchTool(call.name, call.args, turnId, args.onEvent, args.signal);
         scratchpad = await applyToolToScratchpad(scratchpad, call.name as ToolName, call.args, result, turnId);
         responses.push({
@@ -176,13 +290,50 @@ export async function runChatTurn(args: RunChatTurnArgs): Promise<void> {
         shortlist: shortlistTopK(scratchpad.candidates, 6),
       });
       await saveScratchpad(scratchpad);
+
+      // Hard escape: the model is stuck repeating itself.
+      //   • totalDuplicates >= DUPLICATE_HARD_LIMIT — across the whole
+      //     turn, four polite "you already did this" nudges weren't
+      //     enough.
+      //   • duplicatesThisTurn > 0 AND calledFreshThisTurn === 0 — this
+      //     turn was 100% duplicates; the model has nothing new to add.
+      // In either case, exit the tool loop early and force the tool-less
+      // synthesis path below.
+      const stuck =
+        totalDuplicates >= DUPLICATE_HARD_LIMIT ||
+        (duplicatesThisTurn > 0 && calledFreshThisTurn === 0);
+      if (stuck) break;
     }
 
-    // Tool budget exhausted.
+    // Tool budget exhausted. Don't show the user an error — coerce a
+    // tool-less synthesis turn so the model writes an answer from
+    // whatever it gathered. Omitting `tools` from the request leaves
+    // it with only text output as a valid response.
+    contents.push({
+      role: "user",
+      parts: [
+        {
+          text: `You've reached the tool budget for this question. Don't call any more tools. Write your final answer to the user now using ONLY the information already gathered in this turn. If you couldn't find a confident answer, say so clearly and cite what you did find.`,
+        },
+      ],
+    });
+    const finalStream = await openAgenticStream(
+      {
+        model: args.model,
+        contents,
+        // No `tools` → model can only emit text. No more function calls
+        // possible from this point.
+        systemInstruction: SYSTEM_PROMPT,
+        temperature: 0.3,
+        thinkingLevel: "MINIMAL",
+      },
+      args.signal,
+    );
+    const finalTurn = await consumeOneTurn(finalStream, turnId, args.onEvent);
     args.onEvent({
-      kind: "turn-error",
+      kind: "synth-done",
       turnId,
-      error: `Tool budget exhausted after ${MAX_TURNS} turns`,
+      finalText: finalTurn.textBuffer,
     });
     args.onEvent({ kind: "turn-done", turnId });
   } catch (err) {
@@ -234,6 +385,16 @@ async function consumeOneTurn(
   let buf = "";
   const modelParts: NativePart[] = [];
   const functionCalls: Array<{ name: string; args: unknown }> = [];
+  // Gemini streamGenerateContent ships its response across multiple SSE
+  // chunks. For text the chunks are incremental token deltas — what we
+  // want. For function calls, the SAME functionCall part can appear in
+  // several chunks as the model "settles" on its decision. If we treat
+  // each chunk's part as a new call we end up dispatching the same tool
+  // 20-30 times in microseconds inside the for-loop below — which looks
+  // identical to a runaway agent loop but is actually a parser bug.
+  // Dedupe by (name, stable-args-key) so a model decision counts once
+  // no matter how many chunks carried it.
+  const seenFunctionCallKeys = new Set<string>();
   let textBuffer = "";
 
   while (true) {
@@ -269,7 +430,11 @@ async function consumeOneTurn(
             }
           } else if (isFunctionCallPart(part)) {
             const call = part.functionCall as { name: string; args?: unknown };
-            functionCalls.push({ name: call.name, args: call.args ?? {} });
+            const args = call.args ?? {};
+            const key = `${call.name}:${stableArgsKey(args)}`;
+            if (seenFunctionCallKeys.has(key)) continue;
+            seenFunctionCallKeys.add(key);
+            functionCalls.push({ name: call.name, args });
           }
         }
       } catch (err) {
@@ -373,4 +538,32 @@ async function applyToolToScratchpad(
       endedAt: Date.now(),
     },
   );
+}
+
+/**
+ * Stable JSON key for a tool-call's args. Used by the per-turn dedupe
+ * gate to detect repeats.
+ *
+ * - Object keys sorted recursively so {a:1,b:2} === {b:2,a:1}
+ * - Strings normalised: trimmed + lowercased so " Hi " and "hi" collide
+ *   (the model often re-tries the same query with cosmetic differences)
+ * - Arrays compared in order (not sorted) — order is meaningful for them
+ *   (limits, kinds, etc.)
+ */
+function stableArgsKey(args: unknown): string {
+  function norm(v: unknown): unknown {
+    if (v === null || v === undefined) return null;
+    if (typeof v === "string") return v.trim().toLowerCase();
+    if (typeof v !== "object") return v;
+    if (Array.isArray(v)) return v.map(norm);
+    const o = v as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const k of Object.keys(o).sort()) sorted[k] = norm(o[k]);
+    return sorted;
+  }
+  try {
+    return JSON.stringify(norm(args));
+  } catch {
+    return String(args);
+  }
 }

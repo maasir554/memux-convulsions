@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, ListChecks } from "lucide-react";
+import { History, Sparkles, ListChecks, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/memux/chat/lib/agent-store";
@@ -25,19 +25,63 @@ import { ActivityCard } from "@/memux/chat/components/activity/ActivityCard";
 import type { Candidate } from "@/lib/chat/types";
 
 export function AgentPanel() {
-  const steps = useAgentStore((s) => s.steps);
-  const reasoningStream = useAgentStore((s) => s.reasoningStream);
-  const shortlist = useAgentStore((s) => s.shortlist);
+  const liveSteps = useAgentStore((s) => s.steps);
+  const liveReasoning = useAgentStore((s) => s.reasoningStream);
+  const liveShortlist = useAgentStore((s) => s.shortlist);
+  const viewingSnapshot = useAgentStore((s) => s.viewingSnapshot);
+  const exitViewMode = useAgentStore((s) => s.exitViewMode);
+
+  // Snapshot precedence: when the user has opened a past turn via the
+  // eye button, render its frozen state instead of the live store. The
+  // snapshot is plain data (zustand persist serialises it cleanly).
+  const steps = viewingSnapshot?.steps ?? liveSteps;
+  const reasoningStream = viewingSnapshot?.reasoningStream ?? liveReasoning;
+  const shortlist = viewingSnapshot?.shortlist ?? liveShortlist;
 
   return (
-    <aside className="flex h-full w-full flex-col border-l border-border bg-gradient-to-b from-background to-card/40">
+    <aside className="flex h-full min-h-0 w-full flex-col border-l border-border bg-gradient-to-b from-background to-card/40">
+      {viewingSnapshot && (
+        <ViewingPastBanner
+          capturedAt={viewingSnapshot.capturedAt}
+          onClose={exitViewMode}
+        />
+      )}
       {reasoningStream && (
-        <div className="border-b border-border/40 bg-muted/10 px-4 py-2 text-[11px] italic leading-snug text-muted-foreground">
+        <div className="shrink-0 border-b border-border/40 bg-muted/10 px-4 py-2 text-[11px] italic leading-snug text-muted-foreground">
           {reasoningStream.slice(-220)}
         </div>
       )}
       <ActivityStream steps={steps} shortlist={shortlist} />
     </aside>
+  );
+}
+
+function ViewingPastBanner({
+  capturedAt,
+  onClose,
+}: {
+  capturedAt: number;
+  onClose: () => void;
+}) {
+  const when = new Date(capturedAt).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-border/50 bg-muted/20 px-3.5 py-2 text-[11px] text-muted-foreground">
+      <History className="size-3.5 text-foreground/60" aria-hidden />
+      <span className="flex-1 italic">Viewing past turn · {when}</span>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Return to live agent"
+        className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+      >
+        <X className="size-3.5" />
+      </button>
+    </div>
   );
 }
 

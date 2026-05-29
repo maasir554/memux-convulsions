@@ -59,7 +59,7 @@ export function MemuxChatApp() {
   return (
     <div className="flex h-full min-h-0 bg-background text-foreground">
       <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <TopNav />
         <ChatView
           pendingFiles={pendingFiles}

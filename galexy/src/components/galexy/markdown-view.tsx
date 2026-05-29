@@ -447,18 +447,16 @@ function BboxModal({
           />
           {/* Rectangle overlay marking the bbox region. Uses % so the box
               tracks the rendered image regardless of object-fit scaling.
-              The CSS shadow-inset gives a subtle gradient highlight; the
-              border + outer ring make the box pop against any background. */}
+              `ws-bbox-pop` scales it in on mount, then pulses softly so
+              the user's eye is drawn there immediately when the modal
+              opens. */}
           <div
-            className="pointer-events-none absolute rounded-sm border-2 border-primary shadow-[0_0_0_4px_color-mix(in_oklch,var(--primary)_22%,transparent),inset_0_0_0_9999px_color-mix(in_oklch,black_55%,transparent)]"
+            className="ws-bbox-pop pointer-events-none absolute rounded-sm border-2 border-primary"
             style={{
               top: `${topPct}%`,
               left: `${leftPct}%`,
               width: `${widthPct}%`,
               height: `${heightPct}%`,
-              // Note: the inset shadow above darkens the bbox AREA on top of
-              // an outer dimmer applied via the trick below — but we'd need
-              // a 4-sided box-shadow mask to dim only OUTSIDE the box.
             }}
             aria-hidden
           />

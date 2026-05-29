@@ -62,6 +62,7 @@ export type ToolName =
   | "search_semantic"
   | "search_combined"
   | "search_concept"
+  | "search_documents"
   | "find_by_date_range"
   | "dates_in_content"
   | "get_backlinks"

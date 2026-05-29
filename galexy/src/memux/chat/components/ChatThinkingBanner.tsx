@@ -7,12 +7,16 @@
  * cursor — so the user always knows what the agent is doing right now
  * without having to read the right panel.
  *
+ * Visual treatment: deliberately minimal. No pill, no border, no icon.
+ * Left-aligned, sits in the message column flow at the same font size
+ * as a chat message. Reads as "the assistant is typing" rather than as
+ * a separate status chrome element.
+ *
  * Disappears the moment synth-tokens start arriving (the answer takes
  * over the screen real-estate). Also disappears on done / error / idle.
  */
 
 import { useEffect, useState } from "react";
-import { Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/memux/chat/lib/agent-store";
@@ -41,6 +45,7 @@ const TOOL_VERB: Record<ToolName, string> = {
   find_image_region: "Locating",
   get_section_links: "Linking",
   query_section_tree: "Inspecting",
+  search_documents: "Searching",
 };
 
 const IDLE_VERBS = ["Thinking", "Considering", "Reflecting", "Pondering"];
@@ -75,29 +80,23 @@ export function ChatThinkingBanner() {
 
   return (
     <div
-      className="mx-auto my-6 flex w-full max-w-3xl items-center justify-center px-4"
+      className="my-2 flex items-baseline gap-0.5"
       role="status"
       aria-live="polite"
     >
-      <div className="flex items-center gap-3 rounded-full border border-border/40 bg-card/40 px-5 py-2.5 backdrop-blur">
-        <Sparkles
-          className="size-3.5 text-primary"
-          aria-hidden
-          style={{ animation: "ws-soft-pulse 1.8s ease-out infinite" }}
-        />
-        <span
-          key={verb /* re-mount on verb change so the shimmer restarts */}
-          className={cn(
-            "ai-text-shimmer text-sm font-medium tracking-tight",
-            "tabular-nums",
-          )}
-        >
-          {verb}
-        </span>
-        <span className="ws-cursor-blink text-sm font-medium text-foreground/80">
-          ▍
-        </span>
-      </div>
+      <span
+        key={verb /* re-mount on verb change so the shimmer restarts */}
+        className={cn(
+          // Match the chat-message font: 16.5px, weight 300, same prose
+          // rhythm. No pill, no icon, no border — just the word.
+          "ai-text-shimmer text-[16.5px] font-[300] leading-[1.5] tracking-tight",
+        )}
+      >
+        {verb}
+      </span>
+      <span className="ws-cursor-blink text-[16.5px] font-[300] leading-[1.5] text-foreground/70">
+        ▍
+      </span>
     </div>
   );
 }
