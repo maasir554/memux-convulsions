@@ -35,6 +35,7 @@ import {
   EyeOff,
   Loader2,
   Maximize2,
+  MessageSquare,
   Minus,
   Pencil,
   Plus,
@@ -544,13 +545,19 @@ function AnnotationLayer({
   }
 
   // The layer fills the page and only intercepts pointer events when we
-  // need it to. In view-only mode the layer's children are clickable
-  // (for the comment hover-card) but the layer itself passes through.
+  // need it to. In view-only mode the layer itself is pointer-events:none
+  // so text selection on the PDF still works between rects — but the
+  // individual SavedRect children opt back in with pointer-events:auto.
+  //
+  // z-10 is critical: react-pdf's text layer is at z-index 2, so without
+  // an explicit stacking level above it the rect buttons would be buried
+  // and clicks would land on the text layer (which selects text) instead
+  // of toggling the comment popover.
   return (
     <div
       ref={layerRef}
       className={cn(
-        "absolute inset-0",
+        "absolute inset-0 z-10",
         annotateMode ? "cursor-crosshair" : "pointer-events-none",
       )}
       onPointerDown={onPointerDown}
@@ -605,17 +612,17 @@ function SavedRect({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="absolute inset-0 border-2 transition hover:bg-white/10"
+        className="absolute inset-0 cursor-pointer border-2 transition hover:bg-white/10"
         style={{
           borderColor: color,
           backgroundColor: open ? `${color}33` : `${color}1a`,
         }}
-        title={`${annotation.userName} · ${formatTime(annotation.createdAt)}`}
-        aria-label={`Annotation by ${annotation.userName}`}
+        title={`${annotation.userName}: ${annotation.body}`}
+        aria-label={`Annotation by ${annotation.userName}: ${annotation.body}`}
       />
       {/* Author chip — top-left, outside the box */}
       <div
-        className="absolute -top-5 left-0 flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium text-white"
+        className="pointer-events-none absolute -top-5 left-0 flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium text-white"
         style={{ backgroundColor: color }}
       >
         {annotation.userImage ? (
@@ -629,6 +636,17 @@ function SavedRect({
         ) : null}
         <span className="max-w-[8rem] truncate">{annotation.userName}</span>
       </div>
+      {/* Floating comment indicator — sits in the top-right corner so the
+          rect is visibly "clickable for a comment", not just a coloured
+          outline. Hidden once the popover is open to avoid double chrome. */}
+      {!open && (
+        <div
+          className="pointer-events-none absolute -top-2 -right-2 flex size-5 items-center justify-center rounded-full text-white shadow-sm ring-2 ring-background"
+          style={{ backgroundColor: color }}
+        >
+          <MessageSquare className="size-2.5" />
+        </div>
+      )}
       {open && (
         <div
           className="absolute top-full left-0 z-10 mt-1 w-64 rounded-md border bg-popover p-2 text-xs text-popover-foreground shadow-lg"
