@@ -1,14 +1,16 @@
 <!doctype html>
-<html lang="en">
+<!--
+  `class="dark"` is set statically on <html> rather than via an inline
+  <script>. Chrome MV3 forbids inline scripts in extension pages
+  (`script-src 'self'`), so the previous tag was CSP-blocked and Tailwind's
+  dark utilities never activated. The popup is always dark regardless of
+  the console's theme, so a static class is the right model anyway.
+-->
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MEMUX Capture</title>
-    <script>
-      // The popup is always dark — it's a capture overlay, not bound to the
-      // console's user theme.
-      document.documentElement.classList.add("dark");
-    </script>
     <style>
       /* Pin the dark palette directly to <body> via inline style so the
          Tailwind utilities (bg-background, bg-card, text-foreground, …) that
