@@ -42,8 +42,8 @@ import type {
 
 /* ----------------------------------------------------- agentic transport */
 
-type NativePart = Record<string, unknown>;
-type NativeContent = {
+export type NativePart = Record<string, unknown>;
+export type NativeContent = {
   role: "user" | "model" | "function";
   parts: NativePart[];
 };

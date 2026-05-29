@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles, Brain } from "lucide-react";
 
-import { runChatTurn } from "@/lib/chat/harness/orchestrator";
+import { runChatTurn, type NativeContent } from "@/lib/chat/harness/orchestrator";
 import { useAgentStore } from "@/memux/chat/lib/agent-store";
 import { AgentPanel } from "@/memux/chat/components/AgentPanel";
 import { ChatThinkingBanner } from "@/memux/chat/components/ChatThinkingBanner";
@@ -141,6 +141,41 @@ export function ChatView({
     return parts;
   }
 
+  /**
+   * Build a token-cheap recent-history view for KB-mode chats. We send
+   * only completed text turns (skip streaming / system / image-only),
+   * keep the most recent N, and truncate each one — assistant answers
+   * can be very long once charts/tables/outlines are inlined and the
+   * model doesn't need the full prose to maintain conversational
+   * grounding. Tool calls and function responses are deliberately
+   * dropped: re-running a stale tool wave from N turns ago would be
+   * wasteful and risk fetching different data than the prior answer
+   * cited.
+   */
+  function buildRecentHistory(prior: ChatMessage[]): NativeContent[] {
+    const MAX_MESSAGES = 8; // 4 user+assistant pairs of grounding
+    const MAX_CHARS_PER_MSG = 2000;
+    const recent = prior.filter((m) => !m.streaming && m.role !== "system").slice(-MAX_MESSAGES);
+    const out: NativeContent[] = [];
+    for (const m of recent) {
+      const text = m.parts
+        .filter((p): p is { type: "text"; text: string } => p.type === "text")
+        .map((p) => p.text)
+        .join("\n")
+        .trim();
+      if (!text) continue;
+      const trimmed =
+        text.length > MAX_CHARS_PER_MSG
+          ? `${text.slice(0, MAX_CHARS_PER_MSG)}\n…[trimmed]`
+          : text;
+      out.push({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: trimmed }],
+      });
+    }
+    return out;
+  }
+
   async function send(overrideParts?: ContentPart[]) {
     if (!active || !active.model) {
       onOpenSettings();
@@ -148,6 +183,11 @@ export function ChatView({
     }
     const parts = overrideParts ?? buildUserParts();
     if (parts.length === 0) return;
+
+    // Snapshot the prior conversation BEFORE we append the new user/assistant
+    // pair, so the agent's recent-history pass sees the past turns only.
+    // (The about-to-be-sent question is delivered separately via args.question.)
+    const priorMessages = active.messages;
 
     const userMsg: ChatMessage = {
       id: newId(),
@@ -196,6 +236,7 @@ export function ChatView({
         sessionId: active.id,
         question,
         model: active.model,
+        recentHistory: buildRecentHistory(priorMessages),
         signal: ctl.signal,
         onEvent: (event) => {
           applyAgentEvent(event);
