@@ -15,6 +15,11 @@ build/
 
 # production
 dist/
+# …but the browser extension's dist IS committed so the built artefact
+# is distributable straight from the repo (load-unpacked in
+# chrome://extensions, or zip it). Re-include it after the broad ignore.
+!worksmith/extension/dist/
+!worksmith/extension/dist/**
 
 # environment variables
 .env

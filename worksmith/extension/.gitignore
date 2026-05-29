@@ -1,4 +1,6 @@
 node_modules
-dist
+# `dist/` IS committed so the built extension is distributable from the
+# repo — load-unpacked in chrome://extensions or zip it up to share.
+# Regenerate locally with `npm run build` before committing changes.
 *.log
 .DS_Store

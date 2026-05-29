@@ -1419,12 +1419,16 @@ async function ensureContentScript(tabId: number): Promise<boolean> {
 
 /**
  * Tabs matching any of these URL patterns will be treated as galexy receivers.
- * Localhost covers dev; the .* patterns leave room for deployed origins later.
+ * Localhost covers dev; the production vercel.app is the deployed app. Add a
+ * new entry here (and to the matching prefix list inside the onUpdated
+ * listener below) whenever a new receiver origin comes online (e.g. preview
+ * deployments or a custom domain).
  */
 const GALEXY_TAB_MATCHES = [
   "http://localhost:3000/*",
   "https://localhost:3000/*",
   "http://127.0.0.1:3000/*",
+  "https://memux-convulsions.vercel.app/*",
 ];
 
 /** Payload sent to galexy — richer than the legacy bridge contract. */
@@ -1575,14 +1579,18 @@ function deliverInPage(payload: MemuxOutboundCapture[]): Promise<string[]> {
   });
 }
 
-// Trigger when a galexy tab loads / finishes loading.
+// Trigger when a galexy tab loads / finishes loading. Keep this list in
+// sync with GALEXY_TAB_MATCHES above — adding an entry to one without the
+// other gives you a tab the dispatcher accepts but won't auto-fire on,
+// or vice versa.
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete") return;
   const url = tab.url ?? "";
   if (
     url.startsWith("http://localhost:3000/") ||
     url.startsWith("https://localhost:3000/") ||
-    url.startsWith("http://127.0.0.1:3000/")
+    url.startsWith("http://127.0.0.1:3000/") ||
+    url.startsWith("https://memux-convulsions.vercel.app/")
   ) {
     // Small delay so galexy's bridge listener has time to mount.
     setTimeout(() => void dispatchPendingToGalexy(), 800);
