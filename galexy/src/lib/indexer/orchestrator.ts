@@ -196,6 +196,13 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
       questions?: string[];
       concepts?: string[];
       noteItemId?: string;
+      /**
+       * items.id of the FIRST page's source capture for this section
+       * (worksmith screenshot / PDF page render / image). Used downstream
+       * so the chat citation chip can resolve the section back to its
+       * source screenshot. Empty string for text-only sources.
+       */
+      sourceItemId?: string;
     }> = [];
 
     let sectionGlobalOrdinal = 0;
@@ -234,6 +241,7 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
           ordinal: sectionGlobalOrdinal,
           topic: closed.topic,
           sectionMarkdown: sectionMd,
+          sourceItemId: closed.pages.find((p) => p.sourceItemId)?.sourceItemId,
         });
         await scratch(
           runId,
@@ -448,7 +456,7 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
       await db.insert(sections).values({
         id: sectionRowId,
         runId,
-        sourceItemId: "",
+        sourceItemId: sect.sourceItemId ?? "",
         noteItemId,
         ordinal: sect.ordinal,
         kind: "pdf-page",

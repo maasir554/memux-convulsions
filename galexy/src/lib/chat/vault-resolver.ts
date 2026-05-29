@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 import { getVaultDb } from "@/lib/db/vault-db";
 import { indexRuns, items, sections } from "@/lib/db/schema";
@@ -153,7 +153,11 @@ export function useSectionSourceCapture(noteItemId: string | null | undefined): 
         const db = await getVaultDb();
         // sections row → sourceItemId → load the capture item if it's an image
         const [section] = await db
-          .select({ sourceItemId: sections.sourceItemId, runId: sections.runId })
+          .select({
+            sourceItemId: sections.sourceItemId,
+            runId: sections.runId,
+            ordinal: sections.ordinal,
+          })
           .from(sections)
           .where(eq(sections.noteItemId, noteItemId));
         if (!section) {
@@ -161,19 +165,58 @@ export function useSectionSourceCapture(noteItemId: string | null | undefined): 
           if (!cancelled) setState({ forId: noteItemId, capture: null, loading: false });
           return;
         }
-        const [row] = await db
-          .select({
-            id: items.id,
-            title: items.title,
-            type: items.type,
-            folder: items.folder,
-            summary: items.summary,
-            blobKey: items.blobKey,
-            src: items.src,
-            sourceUrl: items.sourceUrl,
-          })
-          .from(items)
-          .where(eq(items.id, section.sourceItemId));
+        let row = section.sourceItemId
+          ? (
+              await db
+                .select({
+                  id: items.id,
+                  title: items.title,
+                  type: items.type,
+                  folder: items.folder,
+                  summary: items.summary,
+                  blobKey: items.blobKey,
+                  src: items.src,
+                  sourceUrl: items.sourceUrl,
+                })
+                .from(items)
+                .where(eq(items.id, section.sourceItemId))
+            )[0]
+          : undefined;
+        // Backfill for sections indexed before the orchestrator started
+        // populating sourceItemId on the row (the column existed but was
+        // hardcoded to ""). Look up any image item in the run's captures
+        // folder, sorted by title — cap-NN-MM titles sort naturally to
+        // page order, so the section's ordinal-th picks the closest
+        // match. Best-effort: for multi-page sections it may not be the
+        // exact one, but the favicon / page-screenshot story still
+        // reads. NOT persisted back since the choice is a heuristic.
+        if (!row || row.type !== "image") {
+          const [run] = await db
+            .select({ groupName: indexRuns.groupName })
+            .from(indexRuns)
+            .where(eq(indexRuns.id, section.runId));
+          if (run?.groupName) {
+            const captureFolder = `_Indexes/${run.groupName}/captures`;
+            const candidates = await db
+              .select({
+                id: items.id,
+                title: items.title,
+                type: items.type,
+                folder: items.folder,
+                summary: items.summary,
+                blobKey: items.blobKey,
+                src: items.src,
+                sourceUrl: items.sourceUrl,
+              })
+              .from(items)
+              .where(and(eq(items.folder, captureFolder), eq(items.type, "image")))
+              .orderBy(asc(items.title));
+            if (candidates.length > 0) {
+              const idx = Math.min(Math.max(0, section.ordinal - 1), candidates.length - 1);
+              row = candidates[idx];
+            }
+          }
+        }
         if (!row || row.type !== "image") {
           captureCache.set(noteItemId, null);
           if (!cancelled) setState({ forId: noteItemId, capture: null, loading: false });
