@@ -159,17 +159,19 @@ export function VaultCitation({
 /* ----------------------------------------------------- capture pill */
 
 /**
- * Inline source affordance shown directly after every citation chip
- * whose cited section traces back to an image capture (PDF page, image
- * file, worksmith webpage screenshot — any of them). Renders a small
- * pill; clicking opens the source screenshot in the shared image modal.
+ * Block-level source preview rendered on a new line directly after
+ * every capture-backed citation chip. Shows the actual page screenshot
+ * as a thumbnail with a host strip on top (favicon + domain when the
+ * capture came from a webpage; doc glyph + title otherwise) so the
+ * reader can SEE what was cited without leaving the answer.
  *
- * Two label modes:
- *   - Capture has a sourceUrl (worksmith webpage) → favicon + host
- *   - No sourceUrl (PDF page / uploaded image) → source-page glyph + label
+ * Clicking the card opens the shared ImageModal at full size with the
+ * "view source" link in its header. Rendered as `display: block` via
+ * a `<span>` wrapper so it slots after the inline chip without
+ * sprouting nested `<div>`-in-`<p>` warnings.
  *
- * Renders nothing for sections sourced from non-image origins (md, code,
- * csv) or when the source row was deleted.
+ * Renders nothing for sections sourced from non-image origins (md,
+ * code, csv) or when the source row was deleted.
  */
 function CapturePill({ noteItemId }: { noteItemId: string }) {
   const { capture } = useSectionSourceCapture(noteItemId);
@@ -185,32 +187,44 @@ function CapturePill({ noteItemId }: { noteItemId: string }) {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setModalOpen(true)}
-        title={
-          capture.sourceUrl
-            ? `Source: ${capture.sourceUrl}`
-            : `Source: ${capture.title}`
-        }
-        className={cn(
-          "ml-1 inline-flex items-center gap-1 rounded-md border border-border/60 bg-card/50 px-1.5 py-0.5 align-baseline",
-          "text-[0.78em] leading-snug text-muted-foreground no-underline",
-          "transition-colors hover:border-foreground/30 hover:bg-muted/60 hover:text-foreground",
-        )}
-      >
-        {host ? (
-          <>
-            <Favicon host={host} className="size-3" />
-            <span className="max-w-[14ch] truncate">{host}</span>
-          </>
-        ) : (
-          <>
-            <FileBox className="size-3 text-rose-300/80" />
-            <span className="max-w-[14ch] truncate">source</span>
-          </>
-        )}
-      </button>
+      <span className="my-2 block">
+        <button
+          type="button"
+          onClick={() => setModalOpen(true)}
+          title={
+            capture.sourceUrl
+              ? `Source: ${capture.sourceUrl}`
+              : `Source: ${capture.title}`
+          }
+          className={cn(
+            "group/cap block w-full max-w-md overflow-hidden rounded-lg border border-border/60 bg-card/50 text-left",
+            "transition-all hover:border-foreground/30 hover:shadow-md",
+          )}
+        >
+          {/* Header strip: favicon/glyph + host/title + open arrow */}
+          <span className="flex items-center gap-2 border-b border-border/40 bg-muted/30 px-2.5 py-1.5">
+            {host ? (
+              <Favicon host={host} className="size-3.5" />
+            ) : (
+              <FileBox className="size-3.5 text-rose-300/80" />
+            )}
+            <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground/85">
+              {host ?? capture.title}
+            </span>
+            <ExternalLink className="size-3 text-muted-foreground/70 transition-colors group-hover/cap:text-foreground/80" />
+          </span>
+
+          {/* Thumbnail body */}
+          <span className="block bg-background/40">
+            <img
+              src={src}
+              alt={capture.title}
+              className="block max-h-[160px] w-full object-cover object-top"
+              loading="lazy"
+            />
+          </span>
+        </button>
+      </span>
       {modalOpen && (
         <ImageModal
           src={src}

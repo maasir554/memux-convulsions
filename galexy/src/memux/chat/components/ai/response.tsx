@@ -170,6 +170,25 @@ const citationComponents: Components = {
 };
 
 /**
+ * Strip the `( citation )` wrapping the model so often produces. After
+ * `rewriteCitationsForSanitizer` runs, citations look like
+ *   `( [Section 02 · …](https://vault.local/item/X) )`
+ * — the parens are pure decoration. Removing them clears visual noise
+ * (especially now that each chip has a source-pill / preview rendered
+ * right after it). Restricted to parentheses whose ONLY content is the
+ * citation + whitespace, so normal prose parens stay intact.
+ */
+function unwrapCitationParens(md: string): string {
+  // Match: open paren, optional ws, one markdown citation (link OR image
+  // embed) whose href is a vault.local URL, optional ws, close paren.
+  // Capture the citation so we can keep just that.
+  return md.replace(
+    /\(\s*(!?\[[^\]]*\]\(https:\/\/vault\.local\/[^)]+\))\s*\)/g,
+    "$1",
+  );
+}
+
+/**
  * Models often write quasi-headings like `**1. Appearance and Size**` on
  * their own line without a blank line above, which renders as inline bold
  * jammed against the paragraph. Promote any line that is *only* a bold span
@@ -195,7 +214,9 @@ export function Response({
   content: string;
   className?: string;
 }) {
-  const processed = rewriteCitationsForSanitizer(promoteHeadings(content));
+  const processed = unwrapCitationParens(
+    rewriteCitationsForSanitizer(promoteHeadings(content)),
+  );
   return (
     <div
       className={cn(
