@@ -218,23 +218,28 @@ export function AppRail() {
                 </Tooltip>
               );
             })}
+
+            {/* Collapse toggle — sits inside the capsule, after the
+                nav items. Same circular hit-target as the items so
+                the column feels cohesive, but distinct by icon
+                (PanelLeftClose) and never receives the traveling
+                disc since it's not in ITEMS. */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={toggle}
+                  aria-label="Hide navigation"
+                  className="relative z-20 flex size-9 items-center justify-center rounded-full text-black/65 transition-colors duration-200 hover:bg-white/25 hover:text-black"
+                >
+                  <PanelLeftClose className="size-4" aria-hidden />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Hide rail</TooltipContent>
+            </Tooltip>
           </div>
 
           <div className="flex-1" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggle}
-                aria-label="Hide navigation"
-                className="flex size-9 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground"
-              >
-                <PanelLeftClose className="size-4" aria-hidden />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">Hide rail</TooltipContent>
-          </Tooltip>
         </div>
       </nav>
     </>
