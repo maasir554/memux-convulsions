@@ -26,6 +26,7 @@ import { Network } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getVaultDb } from "@/lib/db/vault-db";
 import { items } from "@/lib/db/schema";
+import { safeDecodeURIComponent } from "@/memux/chat/lib/uri";
 import type { ItemType } from "@/lib/mock-notes";
 
 /** Slim row shape — we only use these fields, and avoid Note's strict
@@ -63,7 +64,7 @@ export function VaultGraphEmbed({ ids, alt }: { ids: string; alt: string }) {
     () =>
       ids
         .split(",")
-        .map((s) => decodeURIComponent(s.trim()))
+        .map((s) => safeDecodeURIComponent(s.trim()))
         .filter((s) => s.length > 0)
         .slice(0, 12), // visual cap
     [ids],

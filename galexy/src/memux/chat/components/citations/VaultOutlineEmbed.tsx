@@ -18,6 +18,7 @@ import { useMemo } from "react";
 import { ListTree } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { safeDecodeURIComponent } from "@/memux/chat/lib/uri";
 
 type Entry = {
   level: number;
@@ -135,7 +136,7 @@ function parseSpec(spec: string): Entry[] {
     const dash = s.indexOf("-");
     if (dash < 0) continue;
     const levelStr = s.slice(0, dash).trim();
-    const text = decodeURIComponent(s.slice(dash + 1).trim());
+    const text = safeDecodeURIComponent(s.slice(dash + 1).trim());
     const level = Math.max(1, Math.min(6, parseInt(levelStr, 10) || 1));
     if (!text) continue;
     out.push({ level, text, highlighted });

@@ -32,6 +32,7 @@ import Link from "next/link";
 import { Calendar } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { safeDecodeURIComponent } from "@/memux/chat/lib/uri";
 
 type TimelineEvent = {
   label: string;
@@ -232,11 +233,11 @@ function parseSpec(spec: string): TimelineEvent[] {
     // `label@date#itemId` — itemId optional
     const at = item.lastIndexOf("@");
     if (at < 0) continue;
-    const left = decodeURIComponent(item.slice(0, at)).trim();
+    const left = safeDecodeURIComponent(item.slice(0, at)).trim();
     const rest = item.slice(at + 1);
     const hash = rest.indexOf("#");
     const dateStr = (hash < 0 ? rest : rest.slice(0, hash)).trim();
-    const itemId = hash < 0 ? null : decodeURIComponent(rest.slice(hash + 1)).trim() || null;
+    const itemId = hash < 0 ? null : safeDecodeURIComponent(rest.slice(hash + 1)).trim() || null;
     const date = new Date(dateStr);
     if (!Number.isFinite(date.getTime()) || !left) continue;
     events.push({ label: left, date, itemId });

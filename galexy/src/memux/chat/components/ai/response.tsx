@@ -10,6 +10,7 @@ import { VaultChartEmbed } from "@/memux/chat/components/citations/VaultChartEmb
 import { VaultTimelineEmbed } from "@/memux/chat/components/citations/VaultTimelineEmbed";
 import { VaultTableEmbed } from "@/memux/chat/components/citations/VaultTableEmbed";
 import { VaultOutlineEmbed } from "@/memux/chat/components/citations/VaultOutlineEmbed";
+import { safeDecodeURIComponent } from "@/memux/chat/lib/uri";
 
 /**
  * The agent emits citations as `vault:<itemId>` and `vault-image:<itemId>`
@@ -88,7 +89,7 @@ function extractVaultWidget(url: string): VaultWidget | null {
       const m = u.pathname.match(/^\/([^/]+)\/(.+)$/);
       if (m) {
         const kind = m[1];
-        const value = decodeURIComponent(m[2]);
+        const value = safeDecodeURIComponent(m[2]);
         if (EMBED_KINDS.has(kind)) {
           return { kind: kind as Exclude<VaultWidget, { kind: "item" }>["kind"], value };
         }

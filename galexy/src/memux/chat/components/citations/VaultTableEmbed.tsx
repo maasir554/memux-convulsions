@@ -16,6 +16,7 @@ import { useMemo } from "react";
 import { Table } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { safeDecodeURIComponent } from "@/memux/chat/lib/uri";
 
 export function VaultTableEmbed({ spec, alt }: { spec: string; alt: string }) {
   const { headers, rows } = useMemo(() => parseSpec(spec), [spec]);
@@ -122,7 +123,7 @@ function parseSpec(spec: string): { headers: string[]; rows: string[][] } {
   if (rowChunks.length === 0) return { headers: [], rows: [] };
 
   const parseRow = (chunk: string) =>
-    chunk.split("|").map((c) => decodeURIComponent(c.trim()));
+    chunk.split("|").map((c) => safeDecodeURIComponent(c.trim()));
 
   const headers = parseRow(rowChunks[0]);
   const rows = rowChunks.slice(1).map(parseRow);

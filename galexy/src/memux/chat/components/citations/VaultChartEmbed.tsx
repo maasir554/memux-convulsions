@@ -22,6 +22,7 @@ import { useMemo } from "react";
 import { BarChart3, ChartPie, LineChart as LineIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { safeDecodeURIComponent } from "@/memux/chat/lib/uri";
 
 type ChartType = "bar" | "pie" | "donut" | "line" | "area";
 type Datum = { label: string; value: number };
@@ -135,7 +136,7 @@ function parseSpec(
   for (const p of parts.slice(1)) {
     const colon = p.lastIndexOf(":");
     if (colon < 0) continue;
-    const label = decodeURIComponent(p.slice(0, colon)).trim();
+    const label = safeDecodeURIComponent(p.slice(0, colon)).trim();
     const valueStr = p.slice(colon + 1).trim();
     const value = Number(valueStr);
     if (!Number.isFinite(value) || !label) continue;
