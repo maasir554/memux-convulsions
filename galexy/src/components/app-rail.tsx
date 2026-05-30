@@ -219,25 +219,38 @@ export function AppRail() {
               );
             })}
 
-            {/* Collapse toggle — sits inside the capsule, after the
-                nav items. Same circular hit-target as the items so
-                the column feels cohesive, but distinct by icon
-                (PanelLeftClose) and never receives the traveling
-                disc since it's not in ITEMS. */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={toggle}
-                  aria-label="Hide navigation"
-                  className="relative z-20 flex size-9 items-center justify-center rounded-full text-black/65 transition-colors duration-200 hover:bg-white/25 hover:text-black"
-                >
-                  <PanelLeftClose className="size-4" aria-hidden />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Hide rail</TooltipContent>
-            </Tooltip>
           </div>
+
+          {/* Collapse toggle — its OWN small circle sitting directly
+              below the capsule, with the same gradient + noise
+              treatment so it visually belongs to the same family.
+              Size-9 matches the items inside the capsule so the
+              affordance reads as a satellite of the main control. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={toggle}
+                aria-label="Hide navigation"
+                className="relative mt-3 flex size-9 items-center justify-center overflow-hidden rounded-full text-black/65 transition-colors duration-200 hover:text-black"
+                style={{
+                  background:
+                    "linear-gradient(135deg, #f472b6 0%, #fb923c 55%, #fde047 100%)",
+                }}
+              >
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 rounded-full opacity-40 mix-blend-overlay"
+                  style={{
+                    backgroundImage:
+                      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.7 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")",
+                  }}
+                />
+                <PanelLeftClose className="relative z-10 size-4" aria-hidden />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Hide rail</TooltipContent>
+          </Tooltip>
 
           <div className="flex-1" />
         </div>
