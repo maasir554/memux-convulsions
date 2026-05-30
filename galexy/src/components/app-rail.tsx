@@ -97,12 +97,19 @@ export function AppRail() {
   // The login route shouldn't carry app chrome — it's a pre-auth surface.
   if (pathname.startsWith("/login")) return null;
 
-  if (hidden) {
-    // Edge handle: tiny rounded tab on the left edge that pokes back
-    // out so the user can re-summon the rail without remembering a
-    // keyboard shortcut. backdrop-blur lets it sit cleanly over any
-    // app's left sidebar.
-    return (
+  // Item geometry. The traveling disc translates by `activeIdx * PITCH`
+  // pixels along Y to land on the active item. Kept in sync with the
+  // Tailwind sizes used below: size-9 = 36px, gap-2 = 8px ⇒ pitch 44px.
+  const ICON_SIZE = 36;
+  const ICON_GAP = 8;
+  const PITCH = ICON_SIZE + ICON_GAP;
+  const activeIdx = ITEMS.findIndex((item) => item.match(pathname));
+
+  return (
+    <>
+      {/* Edge restore-handle. Always mounted so we can fade it in/out
+          rather than teleport, and pointer-events go away when the
+          rail itself is shown so it can't intercept clicks. */}
       <button
         type="button"
         onClick={toggle}
@@ -110,65 +117,97 @@ export function AppRail() {
         aria-label="Show navigation"
         className={cn(
           "fixed left-0 top-1/2 z-50 -translate-y-1/2 rounded-r-md border border-l-0 border-border/60 bg-card/80 px-1 py-3",
-          "text-muted-foreground backdrop-blur transition-colors hover:bg-muted/60 hover:text-foreground",
+          "text-muted-foreground backdrop-blur transition-opacity duration-200 hover:bg-muted/60 hover:text-foreground",
+          hidden ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       >
         <PanelLeftOpen className="size-4" />
       </button>
-    );
-  }
 
-  return (
-    <nav
-      aria-label="App navigation"
-      className="flex h-full w-[52px] shrink-0 flex-col items-center border-r border-border/40 bg-card/30 py-2"
-    >
-      {/* Top spacer pairs with the bottom one to vertically centre the
-          items group while keeping the toggle pinned to the bottom. */}
-      <div className="flex-1" />
+      {/* Rail: width animates 52 ↔ 0, content is clipped by overflow-
+          hidden so icons fade with the strip instead of squishing. The
+          inner container is kept at a constant 52px wide so the icons
+          never reflow during the collapse. */}
+      <nav
+        aria-label="App navigation"
+        style={{ width: hidden ? 0 : 52 }}
+        className={cn(
+          "relative flex h-full shrink-0 flex-col items-center overflow-hidden border-r border-border/40 bg-card/30",
+          "transition-[width] duration-300 ease-out",
+        )}
+      >
+        <div
+          aria-hidden={hidden}
+          className={cn(
+            "flex h-full w-[52px] shrink-0 flex-col items-center py-2 transition-opacity duration-200",
+            hidden ? "opacity-0" : "opacity-100",
+          )}
+        >
+          {/* Top spacer pairs with the bottom one to vertically centre
+              the items group while keeping the toggle pinned. */}
+          <div className="flex-1" />
 
-      <div className="flex flex-col items-center gap-2">
-        {ITEMS.map((item) => {
-          const Icon = item.Icon;
-          const active = item.match(pathname);
-          return (
-            <Tooltip key={item.href}>
-              <TooltipTrigger asChild>
-                <Link
-                  href={item.href}
-                  aria-current={active ? "page" : undefined}
-                  className={cn(
-                    // size-9 + rounded-full = 36px circle.
-                    "flex size-9 items-center justify-center rounded-full transition-colors",
-                    active
-                      ? "bg-white text-black shadow-sm"
-                      : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
-                  )}
-                >
-                  <Icon className="size-4" aria-hidden />
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">{item.label}</TooltipContent>
-            </Tooltip>
-          );
-        })}
-      </div>
+          <div className="relative flex flex-col items-center gap-2">
+            {/* Traveling indicator — single white disc that slides
+                between item positions when pathname changes. Hidden
+                entirely when no item matches the current route. */}
+            {activeIdx >= 0 && (
+              <span
+                aria-hidden
+                className={cn(
+                  "absolute left-1/2 top-0 size-9 -translate-x-1/2 rounded-full bg-white shadow-sm",
+                  "transition-transform duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)]",
+                )}
+                style={{
+                  transform: `translate(-50%, ${activeIdx * PITCH}px)`,
+                }}
+              />
+            )}
 
-      <div className="flex-1" />
+            {ITEMS.map((item) => {
+              const Icon = item.Icon;
+              const active = item.match(pathname);
+              return (
+                <Tooltip key={item.href}>
+                  <TooltipTrigger asChild>
+                    <Link
+                      href={item.href}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        // z-10 keeps the icon above the traveling disc;
+                        // the disc supplies the bg when it lands here.
+                        "relative z-10 flex size-9 items-center justify-center rounded-full transition-colors duration-200",
+                        active
+                          ? "text-black"
+                          : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+                      )}
+                    >
+                      <Icon className="size-4" aria-hidden />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{item.label}</TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={toggle}
-            aria-label="Hide navigation"
-            className="flex size-9 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground"
-          >
-            <PanelLeftClose className="size-4" aria-hidden />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right">Hide rail</TooltipContent>
-      </Tooltip>
-    </nav>
+          <div className="flex-1" />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={toggle}
+                aria-label="Hide navigation"
+                className="flex size-9 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground"
+              >
+                <PanelLeftClose className="size-4" aria-hidden />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Hide rail</TooltipContent>
+          </Tooltip>
+        </div>
+      </nav>
+    </>
   );
 }
