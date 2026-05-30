@@ -29,9 +29,9 @@ import {
   FilePlus,
   FolderOpen,
   Home,
-  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Sparkles,
   Users,
 } from "lucide-react";
 
@@ -56,7 +56,7 @@ type RailItem = {
 const ITEMS: RailItem[] = [
   { href: "/", label: "Home", Icon: Home, match: (p) => p === "/" },
   { href: "/vault", label: "Vault", Icon: FolderOpen, match: (p) => p.startsWith("/vault") },
-  { href: "/chat", label: "Chat", Icon: MessageSquare, match: (p) => p.startsWith("/chat") },
+  { href: "/chat", label: "AI chat", Icon: Sparkles, match: (p) => p.startsWith("/chat") },
   { href: "/teams", label: "Teams", Icon: Users, match: (p) => p.startsWith("/teams") },
   { href: "/indexer", label: "Indexer", Icon: FilePlus, match: (p) => p.startsWith("/indexer") },
 ];
@@ -121,31 +121,38 @@ export function AppRail() {
   return (
     <nav
       aria-label="App navigation"
-      className="flex h-full w-[52px] shrink-0 flex-col items-center gap-1 border-r border-border/40 bg-card/30 py-2"
+      className="flex h-full w-[52px] shrink-0 flex-col items-center border-r border-border/40 bg-card/30 py-2"
     >
-      {ITEMS.map((item) => {
-        const Icon = item.Icon;
-        const active = item.match(pathname);
-        return (
-          <Tooltip key={item.href}>
-            <TooltipTrigger asChild>
-              <Link
-                href={item.href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex size-9 items-center justify-center rounded-md transition-colors",
-                  active
-                    ? "bg-primary/15 text-foreground ring-1 ring-primary/30"
-                    : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
-                )}
-              >
-                <Icon className="size-4" aria-hidden />
-              </Link>
-            </TooltipTrigger>
-            <TooltipContent side="right">{item.label}</TooltipContent>
-          </Tooltip>
-        );
-      })}
+      {/* Top spacer pairs with the bottom one to vertically centre the
+          items group while keeping the toggle pinned to the bottom. */}
+      <div className="flex-1" />
+
+      <div className="flex flex-col items-center gap-2">
+        {ITEMS.map((item) => {
+          const Icon = item.Icon;
+          const active = item.match(pathname);
+          return (
+            <Tooltip key={item.href}>
+              <TooltipTrigger asChild>
+                <Link
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    // size-9 + rounded-full = 36px circle.
+                    "flex size-9 items-center justify-center rounded-full transition-colors",
+                    active
+                      ? "bg-white text-black shadow-sm"
+                      : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-4" aria-hidden />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">{item.label}</TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
 
       <div className="flex-1" />
 
@@ -155,7 +162,7 @@ export function AppRail() {
             type="button"
             onClick={toggle}
             aria-label="Hide navigation"
-            className="flex size-9 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground"
+            className="flex size-9 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground"
           >
             <PanelLeftClose className="size-4" aria-hidden />
           </button>
