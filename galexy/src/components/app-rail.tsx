@@ -64,9 +64,6 @@ const ITEMS: RailItem[] = [
 export function AppRail() {
   const pathname = usePathname() ?? "";
 
-  // Hidden state — initialised as visible on first render so SSR + first
-  // client paint agree; the effect below pulls the persisted value once
-  // hydration is done.
   // Hidden state. Read localStorage in a layout effect on mount; we
   // can't read it in the initial useState because window doesn't
   // exist during SSR. The setState-in-effect lint is suppressed
@@ -147,44 +144,24 @@ export function AppRail() {
               the items group while keeping the toggle pinned. */}
           <div className="flex-1" />
 
-          {/* Capsule: a rounded-full pill wrapping the icon group, with
-              a diagonal pink → orange → yellow gradient and a film-
-              grain noise overlay layered on top via mix-blend-overlay.
-              Padding gives the icons + traveling disc breathing room
-              inside the capsule; flex items + the absolute-positioned
-              disc both anchor to the padding box, so they stay
-              perfectly aligned. */}
-          <div
-            className="relative flex flex-col items-center gap-2 rounded-full p-1.5"
-            style={{
-              background:
-                "linear-gradient(135deg, #f472b6 0%, #fb923c 55%, #fde047 100%)",
-            }}
-          >
-            {/* Film-grain noise overlay — SVG feTurbulence as a data
-                URI so we don't ship an asset. mix-blend-overlay sits
-                the grain on top of the gradient with proper interaction
-                with the hue underneath. */}
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-0 rounded-full opacity-40 mix-blend-overlay"
-              style={{
-                backgroundImage:
-                  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.7 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")",
-              }}
-            />
-
+          {/* Capsule: a rounded-full pill wrapping the icon group. The
+              interior stays transparent — .app-rail-gradient-border
+              paints a 2px pink → orange → yellow ring via a ::before
+              pseudo + mask-composite:exclude, so the rail chrome shows
+              through inside. Padding gives the icons + traveling disc
+              breathing room; flex items and the absolute-positioned
+              disc both anchor to the padding box and stay aligned. */}
+          <div className="app-rail-gradient-border relative flex flex-col items-center gap-2 rounded-full p-1.5">
             {/* Traveling indicator — single white disc that slides
                 between item positions when pathname changes. Anchored
                 at the padding-box top-left, same column as each icon
                 box, so only Y needs to animate. Hidden entirely when
-                no item matches the current route. z-10 keeps it above
-                the noise overlay. */}
+                no item matches the current route. */}
             {activeIdx >= 0 && (
               <span
                 aria-hidden
                 className={cn(
-                  "absolute left-1.5 top-1.5 z-10 size-9 rounded-full bg-white shadow-sm",
+                  "absolute left-1.5 top-1.5 size-9 rounded-full bg-white shadow-sm",
                   "transition-transform duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)]",
                 )}
                 style={{
@@ -203,12 +180,13 @@ export function AppRail() {
                       href={item.href}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        // z-20 keeps the icon above both the noise
-                        // overlay and the traveling disc.
-                        "relative z-20 flex size-9 items-center justify-center rounded-full transition-colors duration-200",
+                        // z-10 keeps the icon above the traveling
+                        // disc; when the disc lands here the icon
+                        // flips to text-black for legibility.
+                        "relative z-10 flex size-9 items-center justify-center rounded-full transition-colors duration-200",
                         active
                           ? "text-black"
-                          : "text-black/65 hover:bg-white/25 hover:text-black",
+                          : "text-muted-foreground hover:bg-white/10 hover:text-foreground",
                       )}
                     >
                       <Icon className="size-4" aria-hidden />
@@ -218,35 +196,20 @@ export function AppRail() {
                 </Tooltip>
               );
             })}
-
           </div>
 
-          {/* Collapse toggle — its OWN small circle sitting directly
-              below the capsule, with the same gradient + noise
-              treatment so it visually belongs to the same family.
-              Size-9 matches the items inside the capsule so the
-              affordance reads as a satellite of the main control. */}
+          {/* Collapse toggle — its OWN small circle below the capsule
+              with the same gradient ring treatment, so the satellite
+              clearly belongs to the same control family. */}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
                 onClick={toggle}
                 aria-label="Hide navigation"
-                className="relative mt-3 flex size-9 items-center justify-center overflow-hidden rounded-full text-black/65 transition-colors duration-200 hover:text-black"
-                style={{
-                  background:
-                    "linear-gradient(135deg, #f472b6 0%, #fb923c 55%, #fde047 100%)",
-                }}
+                className="app-rail-gradient-border relative mt-3 flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors duration-200 hover:text-foreground"
               >
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute inset-0 rounded-full opacity-40 mix-blend-overlay"
-                  style={{
-                    backgroundImage:
-                      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.7 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")",
-                  }}
-                />
-                <PanelLeftClose className="relative z-10 size-4" aria-hidden />
+                <PanelLeftClose className="size-4" aria-hidden />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">Hide rail</TooltipContent>

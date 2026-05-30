@@ -404,6 +404,28 @@
   will-change: transform, opacity;
 }
 
+/* App-rail gradient border. Paints a 2px pink → orange → yellow ring around
+   the host element via a ::before pseudo + mask-composite:exclude — interior
+   stays whatever the host's background is, so the rail's chrome shows
+   through cleanly. Same technique as ws-widget-frame but static (no
+   rotation / fade) since the rail isn't a transient surface. */
+.app-rail-gradient-border {
+  position: relative;
+}
+.app-rail-gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: linear-gradient(135deg, #f472b6 0%, #fb923c 55%, #fde047 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+}
+
 /* =============================================================================
  * Chat widget frame — multicolor conic-gradient edge ring + spawn fade.
  * Ported from the worksmith capture ring (content.ts:__worksmith_ring__).
