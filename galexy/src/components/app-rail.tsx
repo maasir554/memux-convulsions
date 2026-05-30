@@ -149,17 +149,21 @@ export function AppRail() {
 
           <div className="relative flex flex-col items-center gap-2">
             {/* Traveling indicator — single white disc that slides
-                between item positions when pathname changes. Hidden
+                between item positions when pathname changes. Anchored
+                at the items group's top-left (left:0 top:0); since the
+                items group is the width of its widest child (a 36px
+                link) the disc occupies the same column as each icon
+                box and only needs to translate vertically. Hidden
                 entirely when no item matches the current route. */}
             {activeIdx >= 0 && (
               <span
                 aria-hidden
                 className={cn(
-                  "absolute left-1/2 top-0 size-9 -translate-x-1/2 rounded-full bg-white shadow-sm",
+                  "absolute left-0 top-0 size-9 rounded-full bg-white shadow-sm",
                   "transition-transform duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)]",
                 )}
                 style={{
-                  transform: `translate(-50%, ${activeIdx * PITCH}px)`,
+                  transform: `translateY(${activeIdx * PITCH}px)`,
                 }}
               />
             )}
