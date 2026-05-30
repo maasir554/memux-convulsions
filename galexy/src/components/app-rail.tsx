@@ -147,19 +147,44 @@ export function AppRail() {
               the items group while keeping the toggle pinned. */}
           <div className="flex-1" />
 
-          <div className="relative flex flex-col items-center gap-2">
+          {/* Capsule: a rounded-full pill wrapping the icon group, with
+              a diagonal pink → orange → yellow gradient and a film-
+              grain noise overlay layered on top via mix-blend-overlay.
+              Padding gives the icons + traveling disc breathing room
+              inside the capsule; flex items + the absolute-positioned
+              disc both anchor to the padding box, so they stay
+              perfectly aligned. */}
+          <div
+            className="relative flex flex-col items-center gap-2 rounded-full p-1.5"
+            style={{
+              background:
+                "linear-gradient(135deg, #f472b6 0%, #fb923c 55%, #fde047 100%)",
+            }}
+          >
+            {/* Film-grain noise overlay — SVG feTurbulence as a data
+                URI so we don't ship an asset. mix-blend-overlay sits
+                the grain on top of the gradient with proper interaction
+                with the hue underneath. */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0 rounded-full opacity-40 mix-blend-overlay"
+              style={{
+                backgroundImage:
+                  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.7 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")",
+              }}
+            />
+
             {/* Traveling indicator — single white disc that slides
                 between item positions when pathname changes. Anchored
-                at the items group's top-left (left:0 top:0); since the
-                items group is the width of its widest child (a 36px
-                link) the disc occupies the same column as each icon
-                box and only needs to translate vertically. Hidden
-                entirely when no item matches the current route. */}
+                at the padding-box top-left, same column as each icon
+                box, so only Y needs to animate. Hidden entirely when
+                no item matches the current route. z-10 keeps it above
+                the noise overlay. */}
             {activeIdx >= 0 && (
               <span
                 aria-hidden
                 className={cn(
-                  "absolute left-0 top-0 size-9 rounded-full bg-white shadow-sm",
+                  "absolute left-1.5 top-1.5 z-10 size-9 rounded-full bg-white shadow-sm",
                   "transition-transform duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)]",
                 )}
                 style={{
@@ -178,12 +203,12 @@ export function AppRail() {
                       href={item.href}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        // z-10 keeps the icon above the traveling disc;
-                        // the disc supplies the bg when it lands here.
-                        "relative z-10 flex size-9 items-center justify-center rounded-full transition-colors duration-200",
+                        // z-20 keeps the icon above both the noise
+                        // overlay and the traveling disc.
+                        "relative z-20 flex size-9 items-center justify-center rounded-full transition-colors duration-200",
                         active
                           ? "text-black"
-                          : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+                          : "text-black/65 hover:bg-white/25 hover:text-black",
                       )}
                     >
                       <Icon className="size-4" aria-hidden />
