@@ -5,6 +5,7 @@ import type { Components } from "streamdown";
 import { createMathPlugin } from "@streamdown/math";
 import "katex/dist/katex.min.css";
 import { cn } from "@/memux/chat/lib/utils";
+import { normalizeEquations } from "@/lib/latex";
 
 // `singleDollarTextMath: true` is load-bearing — the default `math` export
 // ships it OFF, so inline `$…$` only renders inside plain paragraphs (via
@@ -238,7 +239,7 @@ export function Response({
 }) {
   const processed = stripOrphanPunctAfterCitation(
     unwrapCitationParens(
-      rewriteCitationsForSanitizer(promoteHeadings(content)),
+      rewriteCitationsForSanitizer(promoteHeadings(normalizeEquations(content))),
     ),
   );
   return (

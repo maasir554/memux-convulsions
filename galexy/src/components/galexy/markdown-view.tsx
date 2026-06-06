@@ -13,6 +13,7 @@ import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 
 import { cn } from "@/lib/utils";
+import { normalizeEquationsInline } from "@/lib/latex";
 import { remarkObsidian } from "@/lib/remark-obsidian";
 import { useBlobUrl } from "@/components/galexy/use-blob-url";
 import type { Note } from "@/lib/mock-notes";
@@ -166,7 +167,7 @@ export function MarkdownView({
         }
         components={components}
       >
-        {content}
+        {normalizeEquationsInline(content)}
       </ReactMarkdown>
     </div>
   );
