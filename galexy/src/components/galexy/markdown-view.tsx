@@ -385,6 +385,11 @@ function BboxCropInline({
             width: natural ? `${natural.w * scale}px` : "auto",
             height: natural ? `${natural.h * scale}px` : "100%",
             maxWidth: "none",
+            // `prose` (tailwind typography) applies `margin: 2em 0` to every
+            // <img>. On an absolutely-positioned element that margin shifts
+            // the image ~32px, sliding the crop window off the bbox (cuts the
+            // bottom, leaks white at the top). Neutralise it like maxWidth.
+            margin: 0,
           }}
         />
       </div>
