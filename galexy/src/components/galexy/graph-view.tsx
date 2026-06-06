@@ -78,6 +78,12 @@ type GraphViewProps = {
   activeId: string | null;
   backlinkCount: Record<string, number>;
   onOpen: (id: string) => void;
+  /** Nodes to spotlight with the accent treatment (chat embed). */
+  highlightIds?: ReadonlySet<string>;
+  /** Nodes the camera should zoom-to-fit once the layout settles. */
+  focusIds?: ReadonlySet<string>;
+  /** Fade everything that isn't highlighted / touching a highlight. */
+  dimUnfocused?: boolean;
 };
 
 export function GraphView({
@@ -86,6 +92,9 @@ export function GraphView({
   activeId,
   backlinkCount,
   onOpen,
+  highlightIds,
+  focusIds,
+  dimUnfocused,
 }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -249,6 +258,9 @@ export function GraphView({
           colors={colors}
           activeId={activeId}
           onOpen={onOpen}
+          highlightIds={highlightIds}
+          focusIds={focusIds}
+          dimUnfocused={dimUnfocused}
         />
       )}
     </div>

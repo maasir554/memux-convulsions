@@ -69,7 +69,28 @@ type ForceGraphCanvasProps = {
   colors: GraphColors;
   activeId: string | null;
   onOpen: (id: string) => void;
+  /**
+   * Nodes to render with the "active" accent treatment (bright fill + bright
+   * label). Used by the chat embed to spotlight the item(s) an answer drew
+   * from. The galaxy-vault usage leaves this empty and relies on `activeId`.
+   */
+  highlightIds?: ReadonlySet<string>;
+  /**
+   * Once the simulation settles, pan/zoom the camera to fit exactly these
+   * nodes. Drives the "in focus" behaviour for the chat embed.
+   */
+  focusIds?: ReadonlySet<string>;
+  /**
+   * When true (and `highlightIds` is non-empty), fade everything that isn't a
+   * highlighted node or an edge touching one — so the focus pops.
+   */
+  dimUnfocused?: boolean;
 };
+
+const EMPTY_IDS: ReadonlySet<string> = new Set();
+
+/** Alpha applied to nodes/edges that are dimmed out when focusing. */
+const DIM_ALPHA = 0.28;
 
 const TIER_TARGET_Y: Record<GraphNodeKind, number> = {
   user: TIER_Y.user,
@@ -227,11 +248,17 @@ export default function ForceGraphCanvas({
   colors,
   activeId,
   onOpen,
+  highlightIds = EMPTY_IDS,
+  focusIds = EMPTY_IDS,
+  dimUnfocused = false,
 }: ForceGraphCanvasProps) {
   const fgRef = useRef<
     ForceGraphMethods<NodeObject<GraphNode>, LinkObject<GraphNode, GraphLink>>
   >(undefined);
   const downPos = useRef<{ x: number; y: number } | null>(null);
+  // Guards the one-shot camera fit so a later simulation reheat doesn't yank
+  // the view back after the user has panned/zoomed.
+  const didFit = useRef(false);
 
   /**
    * Peers of the active node that have BOTH an inbound and an outbound
@@ -289,6 +316,7 @@ export default function ForceGraphCanvas({
       return -700;
     });
     chargeForce?.distanceMax(900);
+    didFit.current = false; // new structure → allow one fresh camera fit
     fg.d3ReheatSimulation();
   }, [graphData]);
 
@@ -356,6 +384,13 @@ export default function ForceGraphCanvas({
         cooldownTicks={150}
         enableNodeDrag={false}
         nodeLabel={() => ""}
+        onEngineStop={() => {
+          const fg = fgRef.current;
+          if (!fg || didFit.current || focusIds.size === 0) return;
+          didFit.current = true;
+          // Pan/zoom so the spotlit nodes fill the frame with breathing room.
+          fg.zoomToFit(600, 48, (n) => focusIds.has(String(n.id)));
+        }}
         // Replace default link rendering so widths + arrow sizes stay constant
         // across zoom levels (default rendering uses graph units, so widths
         // scale with the camera).
@@ -403,6 +438,15 @@ export default function ForceGraphCanvas({
             stroke = colors.link;
           }
 
+          // Fade edges that don't touch a highlighted node when focusing, so
+          // the spotlit constellation reads clearly against the rest.
+          const dimEdge =
+            dimUnfocused &&
+            highlightIds.size > 0 &&
+            !highlightIds.has(sourceId) &&
+            !highlightIds.has(targetId);
+          ctx.globalAlpha = dimEdge ? DIM_ALPHA : 1;
+
           // Target on-screen widths in CSS px (dividing by globalScale
           // converts to graph units at the current zoom).
           const widthPx =
@@ -424,41 +468,51 @@ export default function ForceGraphCanvas({
             const dx = t.x - s.x;
             const dy = t.y - s.y;
             const len = Math.hypot(dx, dy);
-            if (len < 0.001) return;
-            const ux = dx / len;
-            const uy = dy / len;
-            const tr = radius(t as GraphNode);
-            // Base of the arrow sits just outside the target node.
-            const baseX = t.x - ux * (tr + 1 / globalScale);
-            const baseY = t.y - uy * (tr + 1 / globalScale);
-            const arrowLen = 5 / globalScale; // constant on-screen px
-            const arrowWid = 3 / globalScale;
-            // Perpendicular vector.
-            const px = -uy;
-            const py = ux;
-            ctx.beginPath();
-            ctx.moveTo(baseX, baseY);
-            ctx.lineTo(
-              baseX - ux * arrowLen + px * arrowWid,
-              baseY - uy * arrowLen + py * arrowWid,
-            );
-            ctx.lineTo(
-              baseX - ux * arrowLen - px * arrowWid,
-              baseY - uy * arrowLen - py * arrowWid,
-            );
-            ctx.closePath();
-            // Arrowhead matches the line color so the inbound/outbound tint
-            // reads as one continuous cue.
-            ctx.fillStyle = stroke;
-            ctx.fill();
+            if (len >= 0.001) {
+              const ux = dx / len;
+              const uy = dy / len;
+              const tr = radius(t as GraphNode);
+              // Base of the arrow sits just outside the target node.
+              const baseX = t.x - ux * (tr + 1 / globalScale);
+              const baseY = t.y - uy * (tr + 1 / globalScale);
+              const arrowLen = 5 / globalScale; // constant on-screen px
+              const arrowWid = 3 / globalScale;
+              // Perpendicular vector.
+              const px = -uy;
+              const py = ux;
+              ctx.beginPath();
+              ctx.moveTo(baseX, baseY);
+              ctx.lineTo(
+                baseX - ux * arrowLen + px * arrowWid,
+                baseY - uy * arrowLen + py * arrowWid,
+              );
+              ctx.lineTo(
+                baseX - ux * arrowLen - px * arrowWid,
+                baseY - uy * arrowLen - py * arrowWid,
+              );
+              ctx.closePath();
+              // Arrowhead matches the line color so the inbound/outbound tint
+              // reads as one continuous cue.
+              ctx.fillStyle = stroke;
+              ctx.fill();
+            }
           }
+          ctx.globalAlpha = 1; // reset — canvas state is shared across draws
         }}
         nodeCanvasObject={(node, ctx, scale) => {
           if (node.x === undefined || node.y === undefined) return;
           const r = radius(node);
-          const isActive = node.id === activeId;
           const tier = isTier(node.type);
+          // A node is "highlighted" if it's the active item OR one of the
+          // chat-embed's spotlit nodes. Both get the accent treatment.
+          const isActive = node.id === activeId || highlightIds.has(node.id);
           const fill = isActive ? colors.active : colorForNode(node);
+
+          // Fade non-highlighted file/folder nodes when focusing so the
+          // spotlit nodes read first. Tier backbone stays at full strength.
+          const dimNode =
+            dimUnfocused && highlightIds.size > 0 && !isActive && !tier;
+          ctx.globalAlpha = dimNode ? DIM_ALPHA : 1;
 
           ctx.beginPath();
           ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
@@ -500,6 +554,7 @@ export default function ForceGraphCanvas({
             node.y + r + 1.5,
           );
           if (isActive) ctx.restore();
+          ctx.globalAlpha = 1; // reset — canvas state is shared across draws
         }}
       />
     </div>
