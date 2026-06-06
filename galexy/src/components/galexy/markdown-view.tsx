@@ -307,27 +307,47 @@ function BboxCropInline({
   onClick: () => void;
   onError: () => void;
 }) {
-  const PREVIEW_HEIGHT = 220;
+  // Bounding box the preview must fit inside. The crop is scaled to fit
+  // within BOTH dimensions (contain), never to fill one and overflow the
+  // other.
+  const MAX_W = 560;
+  const MAX_H = 320;
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+
+  // Read the intrinsic size. `onLoad` alone is unreliable: a cached/already
+  // decoded image is `complete` before React attaches the handler, so the
+  // load event never reaches us and the crop is stuck in its uncropped
+  // fallback. A ref callback that measures eagerly when the element is
+  // already complete closes that race.
+  const measure = (el: HTMLImageElement | null) => {
+    if (el && el.complete && el.naturalWidth > 0) {
+      setNatural((prev) => prev ?? { w: el.naturalWidth, h: el.naturalHeight });
+    }
+  };
 
   const [ymin, xmin, ymax, xmax] = bbox;
   // Crop dimensions in pixels of the source image. Computed once we know
   // the natural size; until then we render the image whole so the box is
-  // never wrong.
-  const cropPx = natural
-    ? {
-        x: (xmin / 1000) * natural.w,
-        y: (ymin / 1000) * natural.h,
-        w: ((xmax - xmin) / 1000) * natural.w,
-        h: ((ymax - ymin) / 1000) * natural.h,
-      }
-    : null;
+  // never wrong. Guard against degenerate (zero-area) boxes.
+  const cropPx =
+    natural && xmax > xmin && ymax > ymin
+      ? {
+          x: (xmin / 1000) * natural.w,
+          y: (ymin / 1000) * natural.h,
+          w: ((xmax - xmin) / 1000) * natural.w,
+          h: ((ymax - ymin) / 1000) * natural.h,
+        }
+      : null;
 
-  // Scale so the crop fills the preview height (or width, whichever's
-  // tighter on aspect). The image is then translated so the crop's
-  // top-left aligns with the container's top-left.
-  const scale = cropPx ? PREVIEW_HEIGHT / cropPx.h : 1;
-  const containerWidth = cropPx ? Math.min(560, Math.max(120, cropPx.w * scale)) : 360;
+  // Contain-fit: scale so the WHOLE crop region fits inside MAX_W × MAX_H,
+  // preserving aspect ratio. The container is then sized to the scaled crop
+  // exactly, and the image is translated so the crop's top-left anchors the
+  // container's top-left. (Previously we scaled to fill a fixed height then
+  // capped the width at 560px — which silently clipped the right edge of
+  // wide/landscape crops.)
+  const scale = cropPx ? Math.min(MAX_W / cropPx.w, MAX_H / cropPx.h) : 1;
+  const containerWidth = cropPx ? cropPx.w * scale : 360;
+  const containerHeight = cropPx ? cropPx.h * scale : 220;
 
   return (
     <button
@@ -338,7 +358,7 @@ function BboxCropInline({
         "group/bbox my-3 block overflow-hidden rounded-md border border-border bg-muted/20 p-0",
         "transition-all hover:border-foreground/30 hover:shadow-lg",
       )}
-      style={{ height: PREVIEW_HEIGHT, width: containerWidth }}
+      style={{ height: containerHeight, width: containerWidth }}
     >
       <div
         className="relative h-full w-full overflow-hidden"
@@ -351,6 +371,7 @@ function BboxCropInline({
         <img
           src={src}
           alt={alt}
+          ref={measure}
           onLoad={(e) => {
             const el = e.currentTarget;
             setNatural({ w: el.naturalWidth, h: el.naturalHeight });
