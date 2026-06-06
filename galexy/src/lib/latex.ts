@@ -5,16 +5,23 @@
  *
  * Source papers number equations with the plain-TeX `\eqno` / `\leqno`
  * primitives, which KaTeX does NOT implement — so `\eqno(16)` leaks through as
- * literal text. The two renderers handle this differently (see each export).
+ * literal text. KaTeX *does* support `\tag{…}`, but only in display mode, and
+ * remark-math only emits a display-math node for a *fenced* block:
+ *     $$
+ *     <eq>
+ *     $$
+ * A one-line `$$…$$` (or inline `$…$`) is parsed as inline math, where `\tag`
+ * errors. So a numbered equation written one-line can't carry `\tag`.
  */
 
-const EQNO = /\\l?eqno\s*[({]\s*([^)}]*?)\s*[)}]/g;
-// An inline single-$ span (not $$, not escaped) that carries a number.
-const NUMBERED_INLINE = /(?<!\$)\$(?!\$)([^\n$]*\\tag\{[^\n$]*)\$(?!\$)/g;
+const EQNO_TO_TAG = /\\l?eqno\s*[({]\s*([^)}]*?)\s*[)}]/g;
+// A one-line `$…$` OR `$$…$$` span carrying a number (\eqno or \tag). The
+// backreference makes the closing delimiter match the opening one.
+const NUMBERED_SPAN = /(\${1,2})([^\n$]*?(?:\\l?eqno|\\tag)[^\n$]*?)\1/g;
 // Walks "<lhs> \tag{N}" chunks within a span body.
 const CHUNK = /\s*(.*?)\s*\\tag\{([^}]*)\}/g;
 
-/** Split a span body into [lhs, number] equation chunks plus any trailing math. */
+/** Split a span body (already \eqno→\tag) into [lhs, number] chunks + trailing math. */
 function splitEquations(
   body: string,
 ): { equations: Array<{ lhs: string; num: string }>; trailing: string } {
@@ -30,40 +37,51 @@ function splitEquations(
 }
 
 /**
- * Chat renderer. KaTeX's `\tag` only works in *display* mode, and remark-math
- * only emits a display-math node for a *fenced* block (`$$` on its own lines);
- * a one-line `$$…$$` is parsed as inline math where `\tag` errors. So rewrite
- * each numbered inline equation into its own fenced display block — which also
- * gives the line breaks before/after that inline math lacks.
+ * Block form (adds line breaks). For the chat renderer and for notes that have
+ * no task checkboxes. Rewrites each numbered one-line equation into its own
+ * fenced display block so `\tag` renders and the equation gets the line breaks
+ * before/after that inline math lacks.
  */
 export function normalizeEquations(md: string): string {
-  const out = md.replace(EQNO, "\\tag{$1}");
-  return out.replace(NUMBERED_INLINE, (_full, body: string) => {
-    const { equations, trailing } = splitEquations(body);
-    const blocks = equations.map(
-      ({ lhs, num }) => `$$\n${lhs ? `${lhs} ` : ""}\\tag{${num}}\n$$`,
-    );
-    if (trailing) blocks.push(`$$\n${trailing}\n$$`);
-    return `\n\n${blocks.join("\n\n")}\n\n`;
-  });
+  return md
+    .replace(NUMBERED_SPAN, (_full, _delim: string, body: string) => {
+      const { equations, trailing } = splitEquations(
+        body.replace(EQNO_TO_TAG, "\\tag{$1}"),
+      );
+      const blocks = equations.map(
+        ({ lhs, num }) => `$$\n${lhs ? `${lhs} ` : ""}\\tag{${num}}\n$$`,
+      );
+      if (trailing) blocks.push(`$$\n${trailing}\n$$`);
+      return `\n\n${blocks.join("\n\n")}\n\n`;
+    })
+    // Residual \eqno inside already-fenced (multi-line) display blocks.
+    .replace(EQNO_TO_TAG, "\\tag{$1}");
 }
 
 /**
- * Notes renderer. Must preserve line count — rendered line numbers are mapped
- * back to the source to toggle task checkboxes, so the transform may not
- * add/remove lines. A display block would add lines (and `\tag` needs display
- * mode), so instead drop the number out of the math and render it as plain
- * "(N)" text right after an inline equation. No `\tag`, no display mode, no
- * line added.
+ * Line-count-preserving form. For notes that contain task checkboxes, whose
+ * rendered line numbers are mapped back to the source to toggle them — so the
+ * transform must not add/remove lines. Numbered one-line equations are kept
+ * inline with the number dropped out of the math as plain "(N)" text (no
+ * `\tag`, no display mode). `\eqno` left inside fenced display blocks is still
+ * upgraded to `\tag` (a same-line edit, so no line is added).
  */
 export function normalizeEquationsInline(md: string): string {
-  const out = md.replace(EQNO, "\\tag{$1}");
-  return out.replace(NUMBERED_INLINE, (_full, body: string) => {
-    const { equations, trailing } = splitEquations(body);
-    const parts = equations.map(({ lhs, num }) =>
-      lhs ? `$${lhs}$ (${num})` : `(${num})`,
-    );
-    if (trailing) parts.push(`$${trailing}$`);
-    return parts.join(" ");
-  });
+  return md
+    .replace(NUMBERED_SPAN, (_full, _delim: string, body: string) => {
+      const { equations, trailing } = splitEquations(
+        body.replace(EQNO_TO_TAG, "\\tag{$1}"),
+      );
+      const parts = equations.map(({ lhs, num }) =>
+        lhs ? `$${lhs}$ (${num})` : `(${num})`,
+      );
+      if (trailing) parts.push(`$${trailing}$`);
+      return parts.join(" ");
+    })
+    .replace(EQNO_TO_TAG, "\\tag{$1}");
+}
+
+/** True if the markdown contains a GFM task checkbox (`- [ ]` / `- [x]`). */
+export function hasTaskCheckbox(md: string): boolean {
+  return /^\s*[-*+]\s+\[[ xX]\]/m.test(md);
 }

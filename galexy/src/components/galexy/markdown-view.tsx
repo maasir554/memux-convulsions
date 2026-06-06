@@ -13,7 +13,11 @@ import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 
 import { cn } from "@/lib/utils";
-import { normalizeEquationsInline } from "@/lib/latex";
+import {
+  hasTaskCheckbox,
+  normalizeEquations,
+  normalizeEquationsInline,
+} from "@/lib/latex";
 import { remarkObsidian } from "@/lib/remark-obsidian";
 import { useBlobUrl } from "@/components/galexy/use-blob-url";
 import type { Note } from "@/lib/mock-notes";
@@ -167,7 +171,12 @@ export function MarkdownView({
         }
         components={components}
       >
-        {normalizeEquationsInline(content)}
+        {/* Notes with task checkboxes map rendered line numbers back to the
+            source to toggle them, so the equation transform must preserve line
+            count there; notes without tasks get proper fenced display blocks. */}
+        {hasTaskCheckbox(content)
+          ? normalizeEquationsInline(content)
+          : normalizeEquations(content)}
       </ReactMarkdown>
     </div>
   );
