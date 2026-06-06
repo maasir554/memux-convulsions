@@ -8,6 +8,9 @@ import ReactMarkdown, {
   defaultUrlTransform,
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 
 import { cn } from "@/lib/utils";
 import { remarkObsidian } from "@/lib/remark-obsidian";
@@ -154,7 +157,8 @@ export function MarkdownView({
       )}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkObsidian]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkObsidian]}
+        rehypePlugins={[rehypeKatex]}
         urlTransform={(url) =>
           url.startsWith("wikilink:") || url.startsWith("tag:")
             ? url

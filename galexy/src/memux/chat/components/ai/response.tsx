@@ -2,7 +2,16 @@
 
 import { Streamdown } from "streamdown";
 import type { Components } from "streamdown";
+import { createMathPlugin } from "@streamdown/math";
+import "katex/dist/katex.min.css";
 import { cn } from "@/memux/chat/lib/utils";
+
+// `singleDollarTextMath: true` is load-bearing — the default `math` export
+// ships it OFF, so inline `$…$` only renders inside plain paragraphs (via
+// Streamdown's incomplete-markdown preprocessor) and falls through as raw
+// text inside table cells. Enabling it at the remark level makes `$…$`
+// tokenize everywhere, including GFM table cells.
+const math = createMathPlugin({ singleDollarTextMath: true });
 import { VaultCitation } from "@/memux/chat/components/citations/VaultCitation";
 import { VaultImageEmbed } from "@/memux/chat/components/citations/VaultImageEmbed";
 import { VaultGraphEmbed } from "@/memux/chat/components/citations/VaultGraphEmbed";
@@ -253,6 +262,7 @@ export function Response({
     >
       <Streamdown
         components={citationComponents}
+        plugins={{ math }}
         linkSafety={{ enabled: false }}
       >
         {processed}
