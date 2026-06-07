@@ -27,7 +27,7 @@ import {
   items,
   type IndexerDomImage,
 } from "@/lib/db/schema";
-import type { Note } from "@/lib/mock-notes";
+import type { ImageBbox, Note } from "@/lib/mock-notes";
 
 const ROOT = "_Indexes";
 
@@ -245,6 +245,44 @@ export async function materialiseSourceCapture(opts: {
 }
 
 /**
+ * Persist an indexed PDF as a single `pdf` vault item pointing at the original
+ * file's bytes (already in OPFS as the run's file blobKey, or a pre-shipped
+ * `src`). Figure references then live as `page`-tagged bboxes on this one item
+ * — the renderer renders the page on demand and crops it — instead of saving a
+ * screenshot per page. Returns the items.id to attach bboxes to.
+ */
+export async function materialisePdfSource(opts: {
+  groupName: string;
+  fileName: string;
+  blobKey?: string | null;
+  src?: string | null;
+  sourceUrl?: string | null;
+}): Promise<{ itemId: string; title: string }> {
+  const db = await getVaultDb();
+  const folder = indexFolderName(opts.groupName);
+  await insertFolder(db, ROOT);
+  await insertFolder(db, folder);
+  const title = opts.fileName.replace(/\.[^.]+$/, "") || opts.fileName;
+  const id = `idx-pdf-${crypto.randomUUID()}`;
+  const note: Note = {
+    id,
+    title,
+    folder,
+    type: "pdf",
+    summary: "",
+    content: "",
+    tags: ["indexed", "source"],
+    updatedAt: new Date().toISOString().slice(0, 10),
+    blobKey: opts.blobKey ?? undefined,
+    src: opts.src ?? undefined,
+    sourceUrl: opts.sourceUrl ?? undefined,
+    bboxes: [],
+  };
+  await insertItem(db, note);
+  return { itemId: id, title };
+}
+
+/**
  * Update an already-materialised capture with the imageReader agent's
  * description (runs *after* the source page has been visualised, when
  * we have the LLM's summary in hand). Only writes if non-empty so a
@@ -284,6 +322,8 @@ export async function recordBboxOnSource(opts: {
   bbox: [number, number, number, number];
   alt: string;
   caption: string;
+  /** 1-based page, when the source item is a PDF. */
+  page?: number;
   sectionId?: string;
   source?: string;
 }): Promise<{ bboxId: string }> {
@@ -293,30 +333,19 @@ export async function recordBboxOnSource(opts: {
     .select({ bboxes: items.bboxes })
     .from(items)
     .where(eq(items.id, opts.sourceItemId));
-  const existing = ((row?.bboxes as unknown) as Array<{
-    id: string;
-    bbox: [number, number, number, number];
-    alt: string;
-    caption: string;
-    sectionId?: string;
-    source?: string;
-  }> | null) ?? [];
+  const existing = ((row?.bboxes as unknown) as ImageBbox[] | null) ?? [];
+  const next: ImageBbox = {
+    id: bboxId,
+    bbox: opts.bbox,
+    alt: opts.alt,
+    caption: opts.caption,
+    sectionId: opts.sectionId,
+    source: opts.source ?? "visioner",
+  };
+  if (opts.page != null) next.page = opts.page;
   await db
     .update(items)
-    .set({
-      bboxes: [
-        ...existing,
-        {
-          id: bboxId,
-          bbox: opts.bbox,
-          alt: opts.alt,
-          caption: opts.caption,
-          sectionId: opts.sectionId,
-          source: opts.source ?? "visioner",
-        },
-      ],
-      updatedAt: new Date(),
-    })
+    .set({ bboxes: [...existing, next], updatedAt: new Date() })
     .where(eq(items.id, opts.sourceItemId));
   return { bboxId };
 }

@@ -17,6 +17,10 @@ import { eq } from "drizzle-orm";
 import { getVaultDb } from "@/lib/db/vault-db";
 import { items } from "@/lib/db/schema";
 import { readBlobUrl } from "@/lib/blob-store";
+import {
+  fetchBytes,
+  renderPdfPageToCanvas,
+} from "@/lib/pdf-render";
 import { regionFinderCall } from "@/lib/indexer/agent-client";
 import { recordBboxOnSource } from "@/lib/indexer/materialise";
 import type { ToolResult } from "@/lib/chat/types";
@@ -24,6 +28,8 @@ import type { ToolResult } from "@/lib/chat/types";
 export type FindImageRegionInput = {
   itemId: string;
   query: string;
+  /** 1-based page, required when the item is a pdf. */
+  page?: number;
 };
 
 export async function findImageRegion(
@@ -36,14 +42,37 @@ export async function findImageRegion(
   const db = await getVaultDb();
   const [row] = await db.select().from(items).where(eq(items.id, input.itemId));
   if (!row) return { ok: false, error: `No item ${input.itemId}` };
-  if (row.type !== "image") {
-    return { ok: false, error: `Item ${input.itemId} is ${row.type}, not an image` };
+  if (row.type !== "image" && row.type !== "pdf") {
+    return { ok: false, error: `Item ${input.itemId} is ${row.type}, not an image or pdf` };
   }
-  if (!row.blobKey) return { ok: false, error: "Image has no OPFS blob to read" };
 
-  // Pull the bytes through OPFS → base64.
-  const base64 = await readBlobAsBase64(row.blobKey);
-  const mimeType = guessMime(row.title, row.src) || "image/png";
+  // Resolve the bytes to send to the region finder:
+  //   • image → the stored bytes
+  //   • pdf   → rasterise the requested page on demand (we store the original
+  //             PDF, not page screenshots)
+  let base64: string;
+  let mimeType: string;
+  let page: number | undefined;
+  if (row.type === "pdf") {
+    page = input.page;
+    if (!page || page < 1) {
+      return { ok: false, error: "Item is a pdf — pass a 1-based `page` to search." };
+    }
+    const url = row.blobKey ? await readBlobUrl(row.blobKey) : row.src;
+    if (!url) return { ok: false, error: "PDF has no bytes to read" };
+    try {
+      const bytes = await fetchBytes(url);
+      const canvas = await renderPdfPageToCanvas(bytes, page);
+      base64 = canvas.toDataURL("image/png").split(",")[1] ?? "";
+    } finally {
+      if (row.blobKey) URL.revokeObjectURL(url);
+    }
+    mimeType = "image/png";
+  } else {
+    if (!row.blobKey) return { ok: false, error: "Image has no OPFS blob to read" };
+    base64 = await readBlobAsBase64(row.blobKey);
+    mimeType = guessMime(row.title, row.src) || "image/png";
+  }
 
   const out = await regionFinderCall(
     { imageBase64: base64, mimeType, query: q },
@@ -69,6 +98,7 @@ export async function findImageRegion(
     bbox: out.bbox,
     alt: out.caption || q,
     caption: out.caption || q,
+    page,
     source: "chat-agent",
   });
 

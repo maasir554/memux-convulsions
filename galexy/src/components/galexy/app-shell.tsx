@@ -207,13 +207,16 @@ export function AppShell() {
     // Accept either an items.id (preferred for the new bbox-aware
     // references emitted by the indexer) or a case-insensitive title
     // (legacy crop wikilinks and human-typed `![alt](wikilink:My Pic)`).
+    // Both `image` items and `pdf` items can back a bbox reference — a PDF
+    // region renders the page on demand and crops it.
+    const isRefTarget = (n: Note | undefined): n is Note =>
+      !!n && (n.type === "image" || n.type === "pdf");
     const direct = byId.get(token);
-    if (direct && direct.type === "image") return direct;
+    if (isRefTarget(direct)) return direct;
     const id = titleToId.get(token.toLowerCase());
     if (!id) return null;
     const note = byId.get(id);
-    if (!note || note.type !== "image") return null;
-    return note;
+    return isRefTarget(note) ? note : null;
   }
 
   function openTag(tag: string) {

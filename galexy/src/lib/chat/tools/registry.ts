@@ -235,12 +235,16 @@ export const TOOLS: ToolDef[] = [
   {
     name: "find_image_region",
     description:
-      "Locate a region of a vault image item that matches a natural-language query (e.g. 'the pricing table'). Returns a bbox you can cite inline as ![alt](wikilink:<itemId>#bbox=<bboxId>). Persists the region on the image so future calls can reuse it.",
+      "Locate a region of a vault image OR pdf item that matches a natural-language query (e.g. 'the pricing table'). For a pdf, pass the 1-based `page` to search. Returns a bbox you can cite inline as ![alt](wikilink:<itemId>#bbox=<bboxId>). Persists the region on the item so future calls can reuse it.",
     parameters: {
       type: "object",
       properties: {
-        itemId: { type: "string", description: "Vault image item id." },
+        itemId: { type: "string", description: "Vault image or pdf item id." },
         query: { type: "string", description: "Natural-language description of the region to find." },
+        page: {
+          type: "number",
+          description: "1-based page number to search (required when the item is a pdf).",
+        },
       },
       required: ["itemId", "query"],
     },

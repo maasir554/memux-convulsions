@@ -44,6 +44,12 @@ export type ImageBbox = {
   bbox: [number, number, number, number];
   alt: string;
   caption: string;
+  /**
+   * 1-based page the region lives on, when the source item is a `pdf` (the
+   * renderer renders that page on demand and crops it). Absent for plain
+   * `image` items, whose bbox addresses the whole image.
+   */
+  page?: number;
   /** When the bbox was recorded during indexing, the section it belongs to. */
   sectionId?: string;
   /** Optional creator label — "visioner", "user", "chat-agent", etc. */

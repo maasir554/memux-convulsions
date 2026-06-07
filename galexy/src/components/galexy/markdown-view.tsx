@@ -20,6 +20,7 @@ import {
 } from "@/lib/latex";
 import { remarkObsidian } from "@/lib/remark-obsidian";
 import { useBlobUrl } from "@/components/galexy/use-blob-url";
+import { usePdfPageDataUrl } from "@/components/galexy/use-pdf-page";
 import type { Note } from "@/lib/mock-notes";
 
 // Passes a list item's source line number down to its task checkbox (the
@@ -227,7 +228,22 @@ function TaskCheckbox({
  * a themed BrokenImage block if neither source is available or the bytes
  * don't decode.
  */
-function WikilinkImage({
+function WikilinkImage(props: {
+  note: Note;
+  alt: string;
+  bboxId: string | null;
+}) {
+  // Router only (no hooks here) so each renderer below calls its own hooks
+  // unconditionally. PDF-backed regions render the referenced page on demand
+  // then crop — we store the original PDF, not per-page screenshots.
+  return props.note.type === "pdf" ? (
+    <PdfRegion {...props} />
+  ) : (
+    <ImageRegion {...props} />
+  );
+}
+
+function ImageRegion({
   note,
   alt,
   bboxId,
@@ -289,6 +305,78 @@ function WikilinkImage({
       src={url}
       alt={displayAlt}
       onError={() => setErrored(true)}
+      className="my-3 rounded-md border bg-muted/20 max-w-full"
+    />
+  );
+}
+
+/**
+ * PDF-backed region. The vault stores the original PDF; a referenced figure
+ * carries a `page` + bbox. We rasterise just that page on demand (cached) and
+ * feed it as the source into the SAME crop/modal renderers used for images, so
+ * all the crop math (contain-fit, margin reset, etc.) is shared.
+ */
+function PdfRegion({
+  note,
+  alt,
+  bboxId,
+}: {
+  note: Note;
+  alt: string;
+  bboxId: string | null;
+}) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const bbox = bboxId
+    ? (note.bboxes ?? []).find((b) => b.id === bboxId) ?? null
+    : null;
+  const page = bbox?.page ?? 1;
+  const { dataUrl, loading, error } = usePdfPageDataUrl({
+    blobKey: note.blobKey,
+    src: note.src,
+    page,
+  });
+  const displayAlt = alt || bbox?.alt || note.title;
+
+  if (loading) {
+    return (
+      <span className="my-2 inline-block rounded-md border border-dashed border-muted-foreground/40 px-3 py-2 text-xs italic text-muted-foreground">
+        rendering {displayAlt} (p{page})…
+      </span>
+    );
+  }
+  if (error || !dataUrl) {
+    return <BrokenImage alt={displayAlt} reason="Couldn't render PDF page" />;
+  }
+
+  if (bbox) {
+    return (
+      <>
+        <BboxCropInline
+          src={dataUrl}
+          alt={displayAlt}
+          bbox={bbox.bbox}
+          onClick={() => setModalOpen(true)}
+          onError={() => {}}
+        />
+        {modalOpen && (
+          <BboxModal
+            src={dataUrl}
+            alt={displayAlt}
+            note={note}
+            bbox={bbox.bbox}
+            caption={bbox.caption || bbox.alt}
+            onClose={() => setModalOpen(false)}
+          />
+        )}
+      </>
+    );
+  }
+
+  // No bbox — render the whole page.
+  return (
+    <img
+      src={dataUrl}
+      alt={displayAlt}
       className="my-3 rounded-md border bg-muted/20 max-w-full"
     />
   );

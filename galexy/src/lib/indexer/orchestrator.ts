@@ -40,15 +40,14 @@ import {
 import {
   inlineDiagramRefs,
   materialiseDomImages,
+  materialisePdfSource,
   materialiseSourceCapture,
   planIndexFolders,
   recordBboxOnSource,
   renameIndexGroup,
-  updateCaptureSummary,
   writeManifest,
   writeSectionNote,
 } from "@/lib/indexer/materialise";
-import { writeBlob } from "@/lib/blob-store";
 import { getVaultDb } from "@/lib/db/vault-db";
 import { indexChunks, sections, type IndexerDomImage } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
@@ -91,28 +90,18 @@ type PendingSection = {
     visionerOutput: VisionerOutput;
     bitmap?: HTMLCanvasElement;
     /**
-     * `items.id` of the materialised source-capture for this page, if any.
-     * Section md uses this to record bboxes against the source instead of
-     * writing a separate cropped image. Undefined for text-only sources.
+     * `items.id` of the source item this page belongs to, if any. Section md
+     * records bboxes against it instead of writing a separate cropped image:
+     * for PDFs this is the single `pdf` item (with `sourcePage` set so the
+     * renderer renders that page); for image files the `image` item.
+     * Undefined for text-only sources.
      */
     sourceItemId?: string;
+    /** 1-based PDF page for the bbox, when the source item is a PDF. */
+    sourcePage?: number;
   }>;
 };
 
-/**
- * Encode an HTMLCanvasElement to a PNG blob in OPFS and return the
- * resulting blobKey. Used for PDF pages, where the source file's
- * blobKey points at the whole PDF — each rendered page needs its own
- * blob so a vault image item can reference just that page's bytes.
- */
-async function encodeCanvasToBlobKey(canvas: HTMLCanvasElement, name: string): Promise<string> {
-  const blob = await new Promise<Blob | null>((res) =>
-    canvas.toBlob((b) => res(b), "image/png"),
-  );
-  if (!blob) throw new Error("Canvas → blob failed");
-  const file = new File([blob], name, { type: "image/png" });
-  return writeBlob(file);
-}
 
 export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> {
   const { signal } = hooks;
@@ -207,9 +196,6 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
 
     let sectionGlobalOrdinal = 0;
     let sessionState = "";
-    /** Background promises for per-capture summaries + embeddings. Awaited
-     *  before manifest write so the captures show up with descriptions. */
-    const captureSummaryPromises: Promise<unknown>[] = [];
 
     for (let fileIdx = 0; fileIdx < group.files.length; fileIdx++) {
       const fileRef = group.files[fileIdx];
@@ -219,6 +205,42 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
       live.getState().pushAction(`Opening ${fileRef.name}`);
       const file = await fileFromRef(fileRef);
       const extract = extractorFor(fileRef);
+
+      // Decide the file's source item ONCE (not per page). PDFs are stored as
+      // the single original file; figures reference a page + bbox of it and the
+      // renderer rasterises that page on demand. Image files stay a single
+      // image item. Text-only files get no source item.
+      const isPdfFile =
+        fileRef.mimeType === "application/pdf" ||
+        fileRef.name.toLowerCase().endsWith(".pdf");
+      const isImageFile = fileRef.mimeType.startsWith("image/");
+      let fileSourceItemId: string | undefined;
+      if (isPdfFile && fileRef.blobKey) {
+        try {
+          const { itemId } = await materialisePdfSource({
+            groupName,
+            fileName: fileRef.name,
+            blobKey: fileRef.blobKey,
+            sourceUrl: captureSourceUrl,
+          });
+          fileSourceItemId = itemId;
+        } catch (err) {
+          console.warn(`[indexer] pdf source materialise failed (${fileRef.name}):`, err);
+        }
+      } else if (isImageFile && fileRef.blobKey) {
+        try {
+          const { itemId } = await materialiseSourceCapture({
+            groupName,
+            ordinal: String(fileIdx + 1).padStart(2, "0"),
+            blobKey: fileRef.blobKey,
+            mimeType: fileRef.mimeType,
+            sourceUrl: captureSourceUrl,
+          });
+          fileSourceItemId = itemId;
+        } catch (err) {
+          console.warn(`[indexer] image source materialise failed (${fileRef.name}):`, err);
+        }
+      }
 
       let current: PendingSection | null = null;
       let pageOrdinal = 0;
@@ -281,41 +303,12 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
           );
         }
 
-        // Materialise THIS page as a first-class capture item. PDF pages
-        // get a freshly-encoded blob; worksmith image files reuse the
-        // existing OPFS blob from the run's file ref so we don't double-
-        // store the same bytes. The resulting itemId is what every bbox
-        // recorded later this section is attached to.
-        const isImageFile = fileRef.mimeType.startsWith("image/");
-        let captureBlobKey: string | undefined;
-        if (isImageFile && fileRef.blobKey) {
-          captureBlobKey = fileRef.blobKey;
-        } else if (extracted.bitmap) {
-          try {
-            captureBlobKey = await encodeCanvasToBlobKey(
-              extracted.bitmap,
-              `${fileRef.name}-p${extracted.ordinal}.png`,
-            );
-          } catch (err) {
-            console.warn(`[indexer] page encode failed (${fileRef.name} p${extracted.ordinal}):`, err);
-          }
-        }
-        let sourceCaptureId: string | undefined;
-        if (captureBlobKey) {
-          try {
-            const captureOrdinal = `${String(fileIdx + 1).padStart(2, "0")}-${String(extracted.ordinal).padStart(2, "0")}`;
-            const { itemId } = await materialiseSourceCapture({
-              groupName,
-              ordinal: captureOrdinal,
-              blobKey: captureBlobKey,
-              mimeType: extracted.mimeType ?? "image/png",
-              sourceUrl: captureSourceUrl,
-            });
-            sourceCaptureId = itemId;
-          } catch (err) {
-            console.warn(`[indexer] capture materialise failed (${fileRef.name} p${extracted.ordinal}):`, err);
-          }
-        }
+        // Each page's figures attach to the file's single source item
+        // (the PDF, or the image file) — decided once per file above. PDF
+        // bboxes carry the page so the renderer rasterises it on demand; we
+        // no longer screenshot every page into its own image node.
+        const sourceCaptureId = fileSourceItemId;
+        const sourcePage = isPdfFile && fileSourceItemId ? extracted.ordinal : undefined;
 
         live.getState().setCurrentAction({
           verb: "reading",
@@ -336,27 +329,6 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
         );
         live.getState().setCurrentAction(null);
 
-        // Fire imageReader on the page in the background so we get a
-        // standalone description for the capture (becomes the item's
-        // summary + a vector chunk). Doesn't block the Visioner loop.
-        if (sourceCaptureId) {
-          captureSummaryPromises.push(
-            summariseAndEmbedCapture({
-              captureItemId: sourceCaptureId,
-              imageBase64: extracted.imageBase64,
-              mimeType: extracted.mimeType ?? "image/png",
-              fileName: fileRef.name,
-              pageOrdinal: extracted.ordinal,
-              userContext,
-              signal,
-            }).catch((err) =>
-              console.warn(
-                `[indexer] capture summary failed (${fileRef.name} p${extracted.ordinal}):`,
-                err,
-              ),
-            ),
-          );
-        }
         sessionState = result.sessionUpdate;
         live.getState().setCurrentTopic(result.topic);
         live.getState().markPageDone(extracted.ordinal);
@@ -380,6 +352,7 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
           visionerOutput: result,
           bitmap: extracted.bitmap,
           sourceItemId: sourceCaptureId,
+          sourcePage,
         });
 
         if (result.transition === "end") {
@@ -529,9 +502,6 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
 
     // Wait for any straggling embeds (don't block the manifest on slow ones).
     await Promise.allSettled(embedPromises);
-    // Same for per-capture image-reader summaries — these populate the
-    // capture items' `summary` field and their vector chunks.
-    await Promise.allSettled(captureSummaryPromises);
 
     // Materialise DOM images (worksmith captures). For each one we:
     //   1. Look up the surrounding DOM context in the pruned tree (heading,
@@ -773,6 +743,7 @@ async function buildSectionMd(opts: {
           bbox: d.bbox,
           alt: d.alt,
           caption: d.caption,
+          page: p.sourcePage,
         });
         swaps.push({
           sourceItemId: p.sourceItemId,
@@ -863,70 +834,6 @@ async function readBlobAsBase64(blobKey: string): Promise<string> {
   } finally {
     URL.revokeObjectURL(url);
   }
-}
-
-/**
- * Run imageReader on a freshly-materialised source capture, persist the
- * description as the item's summary, and embed it as a `summary`-kind
- * chunk so the chat agent's `search_semantic` can hit the original page
- * directly.
- *
- * Synthetic section row: we don't have a "real" section for whole pages
- * (sections are derived from the Visioner's topic transitions across
- * pages), so we create a kind=`image` section row keyed to the run with
- * the description as both contentText and summary. The chunk's
- * sectionId points at this row.
- */
-async function summariseAndEmbedCapture(opts: {
-  captureItemId: string;
-  imageBase64: string;
-  mimeType: string;
-  fileName: string;
-  pageOrdinal: number;
-  userContext: string;
-  signal?: AbortSignal;
-}): Promise<void> {
-  const result = await imageReaderCall(
-    {
-      imageBase64: opts.imageBase64,
-      mimeType: opts.mimeType,
-      src: opts.fileName,
-      alt: `Page ${opts.pageOrdinal} of ${opts.fileName}`,
-      context: "", // whole-page summary — no neighbouring-DOM context
-      userContext: opts.userContext,
-    },
-    opts.signal,
-  );
-  const description = result.description.trim();
-  if (!description) return;
-  await updateCaptureSummary({
-    itemId: opts.captureItemId,
-    summary: description,
-    tags: result.tags,
-  });
-
-  // Embed: section row of kind=image, one summary chunk for the page.
-  const sectionRowId = `sec-${crypto.randomUUID()}`;
-  const db = await getVaultDb();
-  await db.insert(sections).values({
-    id: sectionRowId,
-    runId: "", // not tied to a run, derivable via items.id if needed
-    sourceItemId: opts.captureItemId,
-    noteItemId: opts.captureItemId,
-    ordinal: opts.pageOrdinal,
-    kind: "image",
-    topic: `Page ${opts.pageOrdinal}`,
-    contentText: description,
-    summary: description,
-    questions: [],
-    concepts: result.tags,
-    images: [],
-  });
-  await embedSectionChunks(
-    sectionRowId,
-    { summary: description, questions: [], concepts: result.tags },
-    opts.signal,
-  ).catch((err) => console.warn("[indexer] capture embed failed:", err));
 }
 
 async function embedSectionChunks(

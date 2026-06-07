@@ -10,6 +10,7 @@
  */
 
 import { readBlobUrl } from "@/lib/blob-store";
+import { PDF_RENDER_SCALE, loadPdfjs } from "@/lib/pdf-render";
 import type { IndexerFileRef } from "@/lib/db/schema";
 
 export type ExtractedSection = {
@@ -35,23 +36,6 @@ export type ExtractedSection = {
 };
 
 /* ------------------------------------------------------------------ pdf */
-
-let pdfjsModule: typeof import("pdfjs-dist") | null = null;
-
-async function loadPdfjs(): Promise<typeof import("pdfjs-dist")> {
-  if (pdfjsModule) return pdfjsModule;
-  // pdfjs-dist v5 is ESM-only; dynamic import to keep it out of SSR.
-  const mod = await import("pdfjs-dist");
-  // Worker URL — mirrors the one used in the PDF viewer.
-  mod.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/build/pdf.worker.min.mjs",
-    import.meta.url,
-  ).toString();
-  pdfjsModule = mod;
-  return mod;
-}
-
-const PDF_RENDER_SCALE = 1.75;
 
 export async function* extractPdf(
   file: File,
