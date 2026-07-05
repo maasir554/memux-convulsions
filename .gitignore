@@ -60,3 +60,6 @@ cookies.txt
 .claude/
 .codex/
 skills-lock.json
+
+# stray agent logs
+cookies.log
