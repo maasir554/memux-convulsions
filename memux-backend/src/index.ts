@@ -29,7 +29,7 @@ type Variables = {
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 // CORS — must include credentials so the session cookie flows on cross-origin
-// fetches from galexy (Vercel) → memux-backend (Workers). Origins come from
+// fetches from memux-frontend (Vercel) → memux-backend (Workers). Origins come from
 // TRUSTED_ORIGINS so we don't hard-code per environment.
 app.use("*", async (c, next) => {
   const allowed = c.env.TRUSTED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean);

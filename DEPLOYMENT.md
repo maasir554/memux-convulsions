@@ -1,6 +1,6 @@
 # Deployment
 
-Galexy (Next.js) → **Vercel Hobby** (free).
+memux-frontend (Next.js) → **Vercel Hobby** (free).
 memux-backend (Worker + D1 + R2 + Durable Object) → **Cloudflare Workers Free**.
 
 Total monthly cost for a 3–5 user hackathon demo: **$0**. The DO is already
@@ -17,7 +17,7 @@ URL so CORS lets it through.
 
 1. **Backend → Cloudflare** (`memux-backend/`)
 2. Note the workers.dev URL it prints
-3. **Frontend → Vercel** (`galexy/`) using that URL as `NEXT_PUBLIC_MEMUX_API_URL`
+3. **Frontend → Vercel** (`memux-frontend/`) using that URL as `NEXT_PUBLIC_MEMUX_API_URL`
 4. Note the vercel.app URL Vercel prints
 5. **Edit `wrangler.jsonc`** under `env.production.vars` with both URLs
 6. **Redeploy backend** so CORS + cookie config picks up the real Vercel URL
@@ -76,7 +76,7 @@ Push the repo to GitHub first (Vercel deploys from a git remote).
 In the Vercel dashboard:
 
 1. **New Project** → import the repo.
-2. **Root Directory** → `galexy`.
+2. **Root Directory** → `memux-frontend`.
 3. **Framework** → Next.js (detected automatically).
 4. **Environment Variables** — add one:
    - `NEXT_PUBLIC_MEMUX_API_URL` = `https://memux-backend.<your-subdomain>.workers.dev`
@@ -85,7 +85,7 @@ In the Vercel dashboard:
 You'll get something like `https://<project-name>.vercel.app`. Copy it —
 that's your `FRONTEND_URL`.
 
-(CLI alternative: `cd galexy && npx vercel --prod`, then set the env var
+(CLI alternative: `cd memux-frontend && npx vercel --prod`, then set the env var
 in the dashboard and redeploy.)
 
 ---

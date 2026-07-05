@@ -6,7 +6,7 @@ which was cloud-only and predates the same-origin proxy refactor.
 
 ## Architecture in one paragraph
 
-The frontend (`galexy/`) is a **Next.js 16** app deployed to **Vercel
+The frontend (`memux-frontend/`) is a **Next.js 16** app deployed to **Vercel
 Hobby**. The backend (`memux-backend/`) is a single **Cloudflare Worker**
 (Hono + Better-Auth + Drizzle) with three bindings: **D1** for users,
 sessions, teams and invites; **R2** for chat attachments; and a
@@ -52,7 +52,7 @@ endpoint.
 ```bash
 git clone <this-repo>
 cd convulsions
-(cd galexy && npm install)
+(cd memux-frontend && npm install)
 (cd memux-backend && npm install)
 ```
 
@@ -88,10 +88,10 @@ http://localhost:8787/api/auth/callback/google
 Google to redirect there directly — Next isn't in the loop for the OAuth
 callback locally.)
 
-### 3. Frontend env: `galexy/.env.local`
+### 3. Frontend env: `memux-frontend/.env.local`
 
 ```bash
-cd ../galexy
+cd ../memux-frontend
 cp .env.local.example .env.local
 $EDITOR .env.local
 ```
@@ -132,7 +132,7 @@ guarantees no stale state if you're chasing a weird symptom.
 
 **Terminal B — frontend:**
 ```bash
-cd galexy
+cd memux-frontend
 npm run dev
 ```
 
@@ -227,7 +227,7 @@ Note this URL — that's `BACKEND_URL` for everything below.
 In the Vercel dashboard:
 
 1. **New Project** → import the GitHub repo.
-2. **Root Directory** = `galexy`.
+2. **Root Directory** = `memux-frontend`.
 3. **Framework** = Next.js (autodetected).
 4. **Environment Variables** — add one:
    - `NEXT_PUBLIC_MEMUX_API_URL` = `<BACKEND_URL>`
@@ -236,7 +236,7 @@ In the Vercel dashboard:
 
 You get `https://<project>.vercel.app`. That's `FRONTEND_URL`.
 
-(CLI alternative: `cd galexy && npx vercel --prod`, then set the env
+(CLI alternative: `cd memux-frontend && npx vercel --prod`, then set the env
 var in the dashboard and trigger a redeploy.)
 
 ### 3. Wire the two together

@@ -16,8 +16,8 @@ export function createAuth(env: WorkerEnv) {
 
   // Cookie behaviour differs by environment. Local dev runs same-site
   // (localhost:3000 ↔ localhost:8787) so Lax is fine. Production runs
-  // cross-origin (galexy on Vercel ↔ Worker on workers.dev or a custom
-  // domain), which requires SameSite=None; Secure.
+// cross-origin (memux-frontend on Vercel ↔ Worker on workers.dev or a custom
+// domain), which requires SameSite=None; Secure.
   const isProd = !env.BETTER_AUTH_URL.startsWith("http://localhost");
 
   return betterAuth({

@@ -16,8 +16,8 @@ const eslintConfig = defineConfig([
   // Ported plasma tree: keep behavioural parity with the original code.
   // Plasma's eslint config didn't have these React-19-style rules, and the
   // patterns flagged below are correctness-neutral code-style preferences.
-  // Scoping the relaxation to src/memux/chat/** keeps the rest of galexy
-  // under the strict ruleset.
+// Scoping the relaxation to src/memux/chat/** keeps the rest of memux-frontend
+// under the strict ruleset.
   {
     files: ["src/memux/chat/**/*.{ts,tsx}"],
     rules: {

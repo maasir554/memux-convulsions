@@ -99,9 +99,9 @@ Better-Auth endpoints (all under `/api/auth/`):
 - `POST /sign-out`           clear session cookie
 - `GET  /get-session`        same data as our `/api/me` proxy
 
-## Cross-origin from galexy
+## Cross-origin from memux-frontend
 
-Galexy (Next dev on `localhost:3000`) calls memux-backend with
+memux-frontend (Next dev on `localhost:3000`) calls memux-backend with
 `credentials: 'include'`. CORS allows origins listed in
 `TRUSTED_ORIGINS` (wrangler.jsonc → vars). Locally that's `localhost:3000`
 and cookies are `SameSite=Lax` (same-site between ports). In production
@@ -126,8 +126,8 @@ src/
 | Phase | Status | What |
 |---|---|---|
 | 1 | scaffolded | Worker boots, Better-Auth mounted, /api/me works |
-| 2 | next | Galexy /login route + useSession + Account UI |
+| 2 | next | memux-frontend /login route + useSession + Account UI |
 | 3 | | Hono routes for teams CRUD (D1) |
 | 4 | | TeamRoom Durable Object (WebSocket Hibernation, message storage) |
-| 5 | | Teams UI in galexy (list + room) |
+| 5 | | Teams UI in memux-frontend (list + room) |
 | 6 | | Polish: avatars, presence, mentions, invite expiry |
