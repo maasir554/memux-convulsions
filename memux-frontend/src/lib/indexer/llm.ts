@@ -23,6 +23,7 @@ const JSON_DISCIPLINE = `You must respond with a single valid JSON value and not
 - No prose before or after.
 - No markdown fences (no \`\`\`json wrapper).
 - All keys and string values double-quoted.
+- Escape every literal backslash inside a string as \\\\ (for example, LaTeX \\alpha must be written as \\\\alpha in the JSON source).
 - No trailing commas.
 If the requested schema is given, every required field must appear.`;
 
@@ -60,9 +61,28 @@ export async function jsonCall<T>(
     } catch (err) {
       lastError = err;
       const msg = err instanceof Error ? err.message : String(err);
+
+      // Gemma occasionally places Markdown/LaTeX backslashes directly in a
+      // JSON string (for example `\alpha`). Preserve that content by escaping
+      // only backslashes that JSON itself does not recognise, then parse once
+      // more before spending another model call on a retry.
+      const repaired = repairInvalidJsonEscapes(stripped);
+      if (repaired !== stripped) {
+        try {
+          const parsed = JSON.parse(repaired) as T;
+          console.warn(
+            `[indexer/llm] Recovered invalid JSON escape (${parseErrorContext(stripped, msg)})`,
+          );
+          return parsed;
+        } catch {
+          // The response has another syntax problem; let the normal retry path
+          // ask the model for a clean replacement.
+        }
+      }
+
       feedback = `\n\nYour previous response did not parse as JSON: ${msg}. Respond again with valid JSON only.`;
       console.warn(
-        `[indexer/llm] JSON parse failed (attempt ${attempt + 1}): ${msg}`,
+        `[indexer/llm] JSON parse failed (attempt ${attempt + 1}): ${msg} (${parseErrorContext(stripped, msg)})`,
       );
     }
   }
@@ -134,4 +154,51 @@ function stripFences(s: string): string {
   const fence = /^```(?:json|JSON)?\s*\n?([\s\S]*?)\n?```$/.exec(trimmed);
   if (fence) return fence[1].trim();
   return trimmed;
+}
+
+/**
+ * Double illegal backslashes inside JSON strings while leaving valid JSON
+ * escapes and all content outside strings untouched.
+ */
+function repairInvalidJsonEscapes(s: string): string {
+  let repaired = "";
+  let inString = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const char = s[i]!;
+    if (char === '"') {
+      inString = !inString;
+      repaired += char;
+      continue;
+    }
+
+    if (!inString || char !== "\\") {
+      repaired += char;
+      continue;
+    }
+
+    const next = s[i + 1];
+    if (next && '"\\/bfnrt'.includes(next)) {
+      repaired += char + next;
+      i++;
+      continue;
+    }
+    if (next === "u" && /^[0-9a-fA-F]{4}$/.test(s.slice(i + 2, i + 6))) {
+      repaired += s.slice(i, i + 6);
+      i += 5;
+      continue;
+    }
+
+    repaired += "\\\\";
+  }
+
+  return repaired;
+}
+
+/** Return a minimal diagnostic without copying document text into logs. */
+function parseErrorContext(s: string, message: string): string {
+  const match = /position (\d+)/.exec(message);
+  if (!match) return "location unavailable";
+  const position = Number(match[1]);
+  return `position ${position}, token ${JSON.stringify(s.slice(position, position + 2))}`;
 }
