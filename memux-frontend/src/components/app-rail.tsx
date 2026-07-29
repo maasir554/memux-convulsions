@@ -28,6 +28,7 @@ import { usePathname } from "next/navigation";
 import {
   FilePlus,
   FolderOpen,
+  FlaskConical,
   Home,
   PanelLeftClose,
   PanelLeftOpen,
@@ -59,6 +60,7 @@ const ITEMS: RailItem[] = [
   { href: "/chat", label: "AI chat", Icon: Sparkles, match: (p) => p.startsWith("/chat") },
   { href: "/teams", label: "Teams", Icon: Users, match: (p) => p.startsWith("/teams") },
   { href: "/indexer", label: "Indexer", Icon: FilePlus, match: (p) => p.startsWith("/indexer") },
+  { href: "/evals", label: "Evaluations", Icon: FlaskConical, match: (p) => p.startsWith("/evals") },
 ];
 
 export function AppRail() {

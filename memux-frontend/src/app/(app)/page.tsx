@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FilePlus, MessageSquare, FolderOpen, Users } from "lucide-react";
+import { FilePlus, MessageSquare, FolderOpen, Users, FlaskConical } from "lucide-react";
 
 import { AccountChip } from "@/components/auth/account-chip";
 import { cn } from "@/lib/utils";
@@ -33,6 +33,13 @@ const TILES = [
     Icon: Users,
     accent: "bg-sky-500/10 text-sky-400 ring-sky-500/20",
   },
+  {
+    href: "/evals",
+    label: "Evaluate",
+    sub: "Run the fixed LoCoMo agent-memory benchmark live.",
+    Icon: FlaskConical,
+    accent: "bg-fuchsia-500/10 text-fuchsia-300 ring-fuchsia-500/20",
+  },
 ] as const;
 
 export default function MemuxHome() {
@@ -54,7 +61,7 @@ export default function MemuxHome() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-5">
           {TILES.map(({ href, label, sub, Icon, accent }) => (
             <Link
               key={href}
