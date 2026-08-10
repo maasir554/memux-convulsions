@@ -8,12 +8,15 @@ import {
   FileText,
   Image as ImageIcon,
   Loader2,
+  ScanText,
   Sparkles,
+  Type,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useActiveGroup } from "@/lib/indexer/queue-store";
 import { useLiveProgress, type LivePhase } from "@/lib/indexer/live-progress";
+import type { IndexerFileRef } from "@/lib/db/schema";
 import { FilePreviewModal } from "./run-view";
 
 /**
@@ -50,6 +53,7 @@ export function LiveView({ open }: { open: boolean }) {
   // collapses to width 0 with a fade — no abrupt unmount.
   const isActive =
     open && phase !== "idle" && !!group && group.id === liveRunId;
+  const activeSource = group?.files[activeFileIndex] ?? null;
 
   return (
     <aside
@@ -81,6 +85,7 @@ export function LiveView({ open }: { open: boolean }) {
             activeFileName={activeFileName}
             activeFileIndex={activeFileIndex}
             totalFiles={totalFiles}
+            source={activeSource}
           />
 
           <Hero
@@ -90,6 +95,7 @@ export function LiveView({ open }: { open: boolean }) {
             activeStripIndex={thumbnails.findIndex((t) => t.status === "active")}
             totalThumbnails={thumbnails.length}
             topic={currentTopic}
+            source={activeSource}
           />
 
           <ThumbStrip
@@ -199,10 +205,12 @@ function FileMeta({
   activeFileName,
   activeFileIndex,
   totalFiles,
+  source,
 }: {
   activeFileName: string | null;
   activeFileIndex: number;
   totalFiles: number;
+  source: IndexerFileRef | null;
 }) {
   if (!activeFileName) {
     return (
@@ -214,9 +222,15 @@ function FileMeta({
   return (
     <div className="flex shrink-0 items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground">
       <div className="flex min-w-0 items-center gap-1.5">
-        <FileText className="size-3.5" />
+        {source?.sourceKind === "text" ? (
+          <Type className="size-3.5" />
+        ) : (
+          <FileText className="size-3.5" />
+        )}
         <span className="truncate text-foreground/80 normal-case tracking-normal">
-          {activeFileName}
+          {source?.sourceKind === "text"
+            ? source.heading?.trim() || "Pasted text"
+            : activeFileName}
         </span>
       </div>
       {totalFiles > 1 && (
@@ -237,6 +251,7 @@ function Hero({
   activeStripIndex,
   totalThumbnails,
   topic,
+  source,
 }: {
   phase: LivePhase;
   dataUrl: string | null;
@@ -244,6 +259,7 @@ function Hero({
   activeStripIndex: number;
   totalThumbnails: number;
   topic: string;
+  source: IndexerFileRef | null;
 }) {
   const stillness =
     phase === "done"
@@ -253,6 +269,10 @@ function Hero({
         : phase === "walking" || phase === "preparing"
           ? ""
           : "ai-still";
+
+  if (source?.sourceKind === "text") {
+    return <TextCorpusHero source={source} phase={phase} topic={topic} />;
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -284,6 +304,111 @@ function Hero({
               ? `${activeStripIndex >= 0 ? activeStripIndex + 1 : totalThumbnails} / ${totalThumbnails}`
               : `p${activeOrdinal}`}
           </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TextCorpusHero({
+  source,
+  phase,
+  topic,
+}: {
+  source: IndexerFileRef;
+  phase: LivePhase;
+  topic: string;
+}) {
+  const body = source.inlineText?.trim() ?? "";
+  const heading =
+    source.heading?.trim() || source.name.replace(/\.md$/i, "") || "Untitled corpus";
+  const paragraphs = body.split(/\n{2,}/).filter((part) => part.trim().length > 0);
+  const wordCount = body ? body.split(/\s+/).filter(Boolean).length : 0;
+  const scanning = SHIMMER_PHASES.has(phase);
+  const status =
+    phase === "done"
+      ? "Corpus indexed"
+      : phase === "failed"
+        ? "Scan interrupted"
+        : "Scanning corpus";
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <div
+        className={cn(
+          "ai-corpus relative min-h-0 flex-1 overflow-hidden rounded-xl ai-glow",
+          scanning && "ai-corpus-scanning",
+          phase === "done" && "ai-still ai-done",
+          phase === "failed" && "ai-still ai-failed",
+        )}
+      >
+        <div className="relative z-10 flex h-full flex-col">
+          <div className="flex shrink-0 items-center justify-between border-b border-white/8 px-4 py-3">
+            <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+              <span className="flex size-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+                <ScanText className="size-3.5" />
+              </span>
+              Text corpus
+            </div>
+            <div className="font-mono text-[9px] text-muted-foreground/70">
+              {wordCount.toLocaleString()} words · {body.length.toLocaleString()} chars
+            </div>
+          </div>
+
+          <div className="relative min-h-0 flex-1 overflow-hidden px-5 py-5">
+            <div className="ai-corpus-copy h-full overflow-hidden">
+              <h3 className="max-w-[28rem] text-xl font-semibold leading-tight tracking-tight text-foreground/95">
+                {heading}
+              </h3>
+              <div className="mt-4 space-y-3 text-[12px] leading-6 text-foreground/65">
+                {paragraphs.length > 0 ? (
+                  paragraphs.map((paragraph, index) => (
+                    <p key={`${index}-${paragraph.slice(0, 24)}`}>
+                      {paragraph}
+                    </p>
+                  ))
+                ) : (
+                  <p className="italic text-muted-foreground">Waiting for corpus text…</p>
+                )}
+              </div>
+            </div>
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-card via-card/75 to-transparent" />
+          </div>
+
+          <div className="flex shrink-0 items-center justify-between border-t border-white/8 px-4 py-2.5 text-[10px]">
+            <span
+              className={cn(
+                "flex items-center gap-1.5 font-medium",
+                phase === "done"
+                  ? "text-emerald-400"
+                  : phase === "failed"
+                    ? "text-destructive"
+                    : "text-cyan-300/80",
+              )}
+            >
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  phase === "done"
+                    ? "bg-emerald-400"
+                    : phase === "failed"
+                      ? "bg-destructive"
+                      : "animate-pulse bg-cyan-300",
+                )}
+              />
+              {status}
+            </span>
+            <span className="max-w-[55%] truncate font-mono text-muted-foreground/70">
+              {topic || source.name}
+            </span>
+          </div>
+        </div>
+
+        {scanning && (
+          <>
+            <div className="ai-corpus-scan-wash" />
+            <div className="ai-corpus-scan-line" />
+          </>
         )}
       </div>
     </div>
