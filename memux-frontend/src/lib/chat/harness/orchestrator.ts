@@ -59,7 +59,7 @@ type AgenticRequest = {
 
 /* ------------------------------------------------------ system prompt */
 
-const SYSTEM_PROMPT = `You are the knowledge-base agent for memux/galexy — a personal vault of indexed notes, PDFs, images, captures, and code snippets.
+const SYSTEM_PROMPT = `You are the knowledge-base agent for MEMUX — a personal vault of indexed notes, PDFs, images, captures, and code snippets.
 
 Tools are how you find and read content. The user has indexed their captures into sections with concepts, questions, and vector embeddings. You should LEAN ON the tools rather than guess from memory.
 

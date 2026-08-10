@@ -30,7 +30,6 @@ import { useClient } from "@/memux/chat/lib/clientSettings";
 import { useActiveChat } from "@/memux/chat/lib/store";
 import { countMessagesTokens } from "@/memux/chat/lib/tokens";
 import { useAgentStore } from "@/memux/chat/lib/agent-store";
-import { MemuxMark } from "@/memux/chat/components/MemuxMark";
 import { ContextMeter } from "@/memux/chat/components/ContextMeter";
 import {
   Tooltip,
@@ -55,12 +54,7 @@ export function TopNav() {
       {/* CELL 1 — main: brand + chat title + optional token meter +
           (when agent panel is closed) the show-agent toggle. */}
       <div className="flex min-w-0 flex-1 items-center gap-2 px-3">
-        <div className="flex items-center gap-2">
-          <MemuxMark size={20} />
-          <span className="text-sm font-bold uppercase tracking-[0.18em] text-foreground">
-            MEMUX
-          </span>
-        </div>
+        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Chat</span>
 
         {active && (
           <>

@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 
+import { useUnifiedShell } from "@/components/unified-shell";
 import { Sidebar } from "@/memux/chat/components/Sidebar";
 import { ChatView } from "@/memux/chat/components/ChatView";
-import { SettingsDialog } from "@/memux/chat/components/SettingsDialog";
 import { DragDropOverlay } from "@/memux/chat/components/DragDropOverlay";
 import { TopNav } from "@/memux/chat/components/TopNav";
 import { useStore } from "@/memux/chat/lib/store";
@@ -29,8 +29,8 @@ export function MemuxChatApp() {
   const newChat = useStore((s) => s.newChat);
   const selectChat = useStore((s) => s.selectChat);
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const { openSettings } = useUnifiedShell();
 
   // Ensure we always have an active chat once the store has rehydrated.
   useEffect(() => {
@@ -58,16 +58,15 @@ export function MemuxChatApp() {
   // math.
   return (
     <div className="flex h-full min-h-0 bg-background text-foreground">
-      <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
+      <Sidebar />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <TopNav />
         <ChatView
           pendingFiles={pendingFiles}
           consumePendingFiles={() => setPendingFiles([])}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={openSettings}
         />
       </div>
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <DragDropOverlay onFiles={(files) => setPendingFiles(files)} />
     </div>
   );

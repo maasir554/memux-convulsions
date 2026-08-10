@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PanelRight } from "lucide-react";
+import { FileText, Network, PanelRight, Search } from "lucide-react";
 import { usePanelRef, type PanelSize } from "react-resizable-panels";
 import { useSearchParams } from "next/navigation";
 
@@ -13,8 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Ribbon, type LeftView } from "@/components/galexy/ribbon";
-import { LeftSidebar } from "@/components/galexy/left-sidebar";
+import { ShellSidebar, useUnifiedShell } from "@/components/unified-shell";
+import { LeftSidebar, type LeftView } from "@/components/galexy/left-sidebar";
 import { EditorPane } from "@/components/galexy/editor-pane";
 import { RightSidebar } from "@/components/galexy/right-sidebar";
 import { StatusBar } from "@/components/galexy/status-bar";
@@ -32,6 +32,12 @@ import {
 } from "@/components/galexy/confirm-dialog";
 
 const ANIM_MS = 240;
+
+const VAULT_VIEWS = [
+  { id: "files" as const, label: "Files", Icon: FileText },
+  { id: "search" as const, label: "Search", Icon: Search },
+  { id: "graph" as const, label: "Graph", Icon: Network },
+];
 
 export function AppShell() {
   const {
@@ -74,7 +80,6 @@ export function AppShell() {
     );
   }, [requestedOpen]);
   const [leftView, setLeftView] = useState<LeftView>("files");
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [animating, setAnimating] = useState(false);
   const [query, setQuery] = useState("");
@@ -83,9 +88,9 @@ export function AppShell() {
     null,
   );
 
-  const leftPanel = usePanelRef();
   const rightPanel = usePanelRef();
   const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { expandSidebar } = useUnifiedShell();
 
   useEffect(
     () => () => {
@@ -98,14 +103,6 @@ export function AppShell() {
     setAnimating(true);
     if (animTimer.current) clearTimeout(animTimer.current);
     animTimer.current = setTimeout(() => setAnimating(false), ANIM_MS + 40);
-  }
-
-  function toggleLeft() {
-    const panel = leftPanel.current;
-    if (!panel) return;
-    pulseAnimation();
-    if (leftCollapsed) panel.expand();
-    else panel.collapse();
   }
 
   function toggleRight() {
@@ -222,16 +219,12 @@ export function AppShell() {
   function openTag(tag: string) {
     setQuery(tag);
     setLeftView("search");
-    if (leftCollapsed) toggleLeft();
+    expandSidebar();
   }
 
   function selectLeftView(view: LeftView) {
-    if (!leftCollapsed && view === leftView) {
-      toggleLeft(); // re-clicking the active view collapses the sidebar
-      return;
-    }
     setLeftView(view);
-    if (leftCollapsed) toggleLeft();
+    expandSidebar();
   }
 
   if (!loadedNotes || !loadedFolders) {
@@ -411,83 +404,106 @@ export function AppShell() {
     void renameFolder(path, newPath);
   }
 
-  return (
-    <div className="flex h-screen w-full flex-col overflow-hidden">
-      <div className="relative flex min-h-0 flex-1">
-        <Ribbon
-          leftView={leftView}
-          onSelectLeftView={selectLeftView}
-          onToggleLeft={toggleLeft}
-          leftCollapsed={leftCollapsed}
-        />
-
-        <ResizablePanelGroup
-          orientation="horizontal"
-          className={cn("min-w-0 flex-1", animating && "galexy-animating")}
-        >
-          <ResizablePanel
-            id="left"
-            panelRef={leftPanel}
-            collapsible
-            collapsedSize={0}
-            defaultSize="20%"
-            minSize="14%"
-            maxSize="50%"
-            onResize={(size: PanelSize) =>
-              setLeftCollapsed(size.asPercentage < 1)
-            }
-            className="overflow-hidden bg-sidebar"
-          >
-            <LeftSidebar
-              view={leftView}
-              notes={notes}
-              items={allItems}
-              folderNames={folderNames}
-              activeId={activeId ?? ""}
-              onOpen={openNote}
-              query={query}
-              onQueryChange={setQuery}
-              edges={edges}
-              backlinkCount={backlinkCount}
-              onCreateNote={handleCreateNote}
-              onCreateFolder={createFolder}
-              onUploadFiles={handleUploadFiles}
-              onDeleteItem={handleDeleteItem}
-              onDeleteFolder={handleDeleteFolder}
-              onDeleteBulk={handleDeleteBulk}
-              onRenameItem={handleRenameItem}
-              onRenameFolder={handleRenameFolder}
-              onMoveItem={moveItem}
-              onMoveFolder={(old, newParent) => void moveFolder(old, newParent)}
-            />
-          </ResizablePanel>
-
-          <ResizableHandle
-            withHandle
+  const vaultSidebar = (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="grid shrink-0 grid-cols-3 gap-1 border-b border-sidebar-border p-2">
+        {VAULT_VIEWS.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => selectLeftView(id)}
+            aria-pressed={leftView === id}
             className={cn(
-              "transition-opacity duration-200",
-              leftCollapsed && "pointer-events-none opacity-0",
+              "flex h-8 items-center justify-center gap-1.5 rounded-lg text-[11px] transition-colors",
+              leftView === id
+                ? "bg-sidebar-accent text-foreground"
+                : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
             )}
-          />
+          >
+            <Icon className="size-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1">
+        <LeftSidebar
+          view={leftView}
+          notes={notes}
+          folderNames={folderNames}
+          activeId={activeId ?? ""}
+          onOpen={openNote}
+          query={query}
+          onQueryChange={setQuery}
+          items={allItems}
+          edges={edges}
+          backlinkCount={backlinkCount}
+          onCreateNote={handleCreateNote}
+          onCreateFolder={createFolder}
+          onUploadFiles={handleUploadFiles}
+          onDeleteItem={handleDeleteItem}
+          onDeleteFolder={handleDeleteFolder}
+          onDeleteBulk={handleDeleteBulk}
+          onRenameItem={handleRenameItem}
+          onRenameFolder={handleRenameFolder}
+          onMoveItem={moveItem}
+          onMoveFolder={(old, newParent) => void moveFolder(old, newParent)}
+        />
+      </div>
+    </div>
+  );
 
-          <ResizablePanel id="main" defaultSize="58%" minSize="30%">
-            <EditorPane
-              tabs={tabs}
-              activeId={activeId}
-              activeNote={activeNote}
-              folderChildren={folderChildren}
-              onActivate={setActiveId}
-              onClose={closeTab}
-              onOpen={openNote}
-              onChange={updateContent}
-              onSheetMetaChange={updateSheetMeta}
-              onPdfAnnotationsChange={updatePdfAnnotations}
-              linkExists={wikiLinkExists}
-              onOpenWikiLink={openWikiLink}
-              onOpenTag={openTag}
-              resolveWikiImage={resolveWikiImage}
-            />
-          </ResizablePanel>
+  return (
+    <>
+      <ShellSidebar
+        compact={
+          <>
+            {VAULT_VIEWS.map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => selectLeftView(id)}
+                aria-label={label}
+                aria-pressed={leftView === id}
+                className={cn(
+                  "flex size-9 items-center justify-center rounded-lg",
+                  leftView === id
+                    ? "bg-sidebar-accent text-foreground"
+                    : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+                )}
+              >
+                <Icon className="size-4" />
+              </button>
+            ))}
+          </>
+        }
+      >
+        {vaultSidebar}
+      </ShellSidebar>
+
+      <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
+        <div className="relative flex min-h-0 flex-1">
+          <ResizablePanelGroup
+            orientation="horizontal"
+            className={cn("min-w-0 flex-1", animating && "galexy-animating")}
+          >
+            <ResizablePanel id="main" defaultSize="72%" minSize="38%">
+              <EditorPane
+                tabs={tabs}
+                activeId={activeId}
+                activeNote={activeNote}
+                folderChildren={folderChildren}
+                onActivate={setActiveId}
+                onClose={closeTab}
+                onOpen={openNote}
+                onChange={updateContent}
+                onSheetMetaChange={updateSheetMeta}
+                onPdfAnnotationsChange={updatePdfAnnotations}
+                linkExists={wikiLinkExists}
+                onOpenWikiLink={openWikiLink}
+                onOpenTag={openTag}
+                resolveWikiImage={resolveWikiImage}
+              />
+            </ResizablePanel>
 
           <ResizableHandle
             withHandle
@@ -502,7 +518,7 @@ export function AppShell() {
             panelRef={rightPanel}
             collapsible
             collapsedSize={0}
-            defaultSize="22%"
+            defaultSize="28%"
             minSize="16%"
             maxSize="34%"
             onResize={(size: PanelSize) =>
@@ -520,7 +536,7 @@ export function AppShell() {
               onToggleRight={toggleRight}
             />
           </ResizablePanel>
-        </ResizablePanelGroup>
+          </ResizablePanelGroup>
 
         {/* Keep a right-sidebar trigger pinned to the rightmost edge even when
             the panel is collapsed. */}
@@ -543,16 +559,15 @@ export function AppShell() {
             </Tooltip>
           </div>
         )}
+        </div>
+
+        <StatusBar activeNote={activeNote} backlinkCount={backlinks.length} />
+
+        <ConfirmDialog
+          request={confirmRequest}
+          onClose={() => setConfirmRequest(null)}
+        />
       </div>
-
-      <StatusBar activeNote={activeNote} backlinkCount={backlinks.length} />
-
-      {/* Custom confirmation dialog — replaces window.confirm() for the
-          three delete flows so the modal matches app theming. */}
-      <ConfirmDialog
-        request={confirmRequest}
-        onClose={() => setConfirmRequest(null)}
-      />
-    </div>
+    </>
   );
 }

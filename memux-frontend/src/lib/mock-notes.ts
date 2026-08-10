@@ -84,12 +84,12 @@ export const NOTES: Note[] = [
     title: "Welcome",
     folder: "",
     type: "markdown",
-    summary: "Start here — what galexy is and how to get around.",
+    summary: "Start here — how to explore your connected MEMUX workspace.",
     tags: ["start"],
     updatedAt: "2026-05-25",
-    content: `# Welcome to galexy
+    content: `# Welcome to MEMUX
 
-This is a graph-based notebook, inspired by [[MEMUX]] and Obsidian.
+This is your connected knowledge workspace: notes, files, links, search, and AI in one place.
 
 ## Get started
 - Open notes from the file explorer on the left
@@ -97,7 +97,7 @@ This is a graph-based notebook, inspired by [[MEMUX]] and Obsidian.
 - Watch the **Backlinks** panel on the right update as you browse
 
 > [!note] Tip
-> Everything here is mock data for the shell. Real editing comes next.
+> Use the space switcher to move between Explore, Chat, Index, and Teams without losing context.
 
 #start`,
   },

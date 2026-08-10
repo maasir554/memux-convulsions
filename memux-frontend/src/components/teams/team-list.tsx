@@ -15,7 +15,8 @@ import { useRouter } from "next/navigation";
 import { Loader2, Plus, UserPlus, Users } from "lucide-react";
 
 import { useSession } from "@/lib/auth/client";
-import { AccountChip } from "@/components/auth/account-chip";
+import { ShellSidebar, useUnifiedShell } from "@/components/unified-shell";
+import { TeamsAccessState } from "@/components/teams/teams-access-state";
 import { teamsApi, ApiError } from "@/lib/teams/api";
 import type { TeamSummary } from "@/lib/teams/types";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,22 @@ import {
 import { cn } from "@/lib/utils";
 
 export function TeamList() {
+  const { backendAvailable } = useUnifiedShell();
+
+  if (backendAvailable !== true) {
+    return (
+      <TeamsAccessState
+        next="/teams"
+        pending={backendAvailable === null}
+        backendAvailable={backendAvailable !== false}
+      />
+    );
+  }
+
+  return <ConnectedTeamList />;
+}
+
+function ConnectedTeamList() {
   const router = useRouter();
   const { data: session, isPending: sessionPending } = useSession();
 
@@ -38,13 +55,6 @@ export function TeamList() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
-
-  // Auth gate.
-  useEffect(() => {
-    if (!sessionPending && !session?.user) {
-      router.replace("/login?next=/teams");
-    }
-  }, [sessionPending, session?.user, router]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -60,29 +70,54 @@ export function TeamList() {
     if (session?.user) void load();
   }, [session?.user, load]);
 
-  if (sessionPending || !session?.user) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <Loader2 className="size-5 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+  if (sessionPending) return <TeamsAccessState next="/teams" pending />;
+  if (!session?.user) return <TeamsAccessState next="/teams" />;
 
   return (
     <div className="flex flex-1 flex-col bg-background">
+      <ShellSidebar
+        compact={
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+            aria-label="Create team"
+            title="Create team"
+          >
+            <Plus className="size-4" />
+          </button>
+        }
+      >
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="border-b border-sidebar-border p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Your teams</div>
+            <div className="mt-3 grid grid-cols-2 gap-1.5">
+              <button type="button" onClick={() => setCreateOpen(true)} className="flex h-8 items-center justify-center gap-1.5 rounded-lg bg-foreground text-[11px] text-background">
+                <Plus className="size-3.5" /> Create
+              </button>
+              <button type="button" onClick={() => setJoinOpen(true)} className="flex h-8 items-center justify-center gap-1.5 rounded-lg border text-[11px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+                <UserPlus className="size-3.5" /> Join
+              </button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            {teams?.map((team) => (
+              <Link key={team.id} href={`/teams/${team.id}`} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+                <Users className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{team.name}</span>
+                <span className="text-[9px] tabular-nums opacity-60">{team.memberCount}</span>
+              </Link>
+            ))}
+            {teams?.length === 0 && <div className="px-3 py-8 text-center text-xs text-muted-foreground">Create or join a team to begin.</div>}
+          </div>
+        </div>
+      </ShellSidebar>
+
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
-        <Link
-          href="/"
-          className="text-xs text-muted-foreground hover:text-foreground"
-        >
-          ← MEMUX
-        </Link>
-        <div className="text-sm font-medium">Teams</div>
+        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Teams</div>
+        <div className="text-sm font-medium">Shared spaces</div>
         <div className="text-xs text-muted-foreground">
           Real-time chat with people you invite.
-        </div>
-        <div className="ml-auto">
-          <AccountChip />
         </div>
       </header>
 

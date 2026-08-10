@@ -105,7 +105,6 @@ export function ChatView({
     if (pendingFiles.length === 0) return;
     void attachFiles(pendingFiles);
     consumePendingFiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingFiles]);
 
   // Generic compose-append channel: any widget (or other surface) can
@@ -281,6 +280,19 @@ export function ChatView({
       },
     });
   }
+
+  // The welcome surface can hand a first prompt directly to Chat. Removing
+  // the hand-off before sending makes this safe under React Strict Mode and
+  // preserves the normal streaming, auto-title, and agent flows.
+  useEffect(() => {
+    if (!active || !active.model || isStreaming) return;
+    const pending = window.sessionStorage.getItem("memux.pending-prompt")?.trim();
+    if (!pending) return;
+    window.sessionStorage.removeItem("memux.pending-prompt");
+    void send([{ type: "text", text: pending }]);
+    // `send` intentionally uses the latest active session captured by this
+    // render; the persisted hand-off is the single-run guard.
+  }, [active?.id, active?.model]);
 
   function stop() {
     abortRef.current?.abort();

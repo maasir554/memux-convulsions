@@ -70,7 +70,7 @@ const WORKSPACE_ID = "__tier:workspace";
 // Display labels. The workspace name will become per-user / per-space data
 // once multi-workspace support lands; for now it's the app name.
 const USER_LABEL = "You";
-const WORKSPACE_LABEL = "galexy";
+const WORKSPACE_LABEL = "MEMUX";
 
 type GraphViewProps = {
   items: Note[];

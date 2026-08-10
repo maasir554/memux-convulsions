@@ -14,29 +14,64 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { LogOut } from "lucide-react";
+import { LogIn, LogOut } from "lucide-react";
 
 import { authClient, useSession } from "@/lib/auth/client";
 import { cn } from "@/lib/utils";
 
-export function AccountChip() {
+export function AccountChip({
+  backendAvailable,
+  compact = false,
+}: {
+  backendAvailable: boolean | null;
+  compact?: boolean;
+}) {
+  if (backendAvailable === null) {
+    return (
+      <div
+        className={cn(
+          "h-9 animate-pulse rounded-lg bg-muted",
+          compact ? "w-9" : "w-full",
+        )}
+        aria-hidden
+      />
+    );
+  }
+
+  if (!backendAvailable) return <SignedOutAccount compact={compact} />;
+
+  return <ConnectedAccountChip compact={compact} />;
+}
+
+function SignedOutAccount({ compact }: { compact: boolean }) {
+  return (
+    <Link
+      href="/login"
+      className={cn(
+        "flex h-9 min-w-0 items-center gap-2 rounded-lg text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+        compact ? "w-9 justify-center" : "w-full px-2",
+      )}
+      title="Sign in"
+    >
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-full border bg-background">
+        <LogIn className="size-3.5" />
+      </span>
+      {!compact && <span className="truncate font-medium">Sign in</span>}
+    </Link>
+  );
+}
+
+function ConnectedAccountChip({ compact }: { compact: boolean }) {
   const router = useRouter();
   const { data, isPending } = useSession();
   const [signingOut, setSigningOut] = useState(false);
 
   if (isPending) {
-    return <div className="size-8 animate-pulse rounded-full bg-muted" aria-hidden />;
+    return <div className="size-9 animate-pulse rounded-lg bg-muted" aria-hidden />;
   }
 
   if (!data?.user) {
-    return (
-      <Link
-        href="/login"
-        className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-card hover:text-foreground"
-      >
-        Sign in
-      </Link>
-    );
+    return <SignedOutAccount compact={compact} />;
   }
 
   const { user } = data;
@@ -52,7 +87,7 @@ export function AccountChip() {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className={cn("flex h-9 min-w-0 items-center", compact ? "justify-center" : "gap-2 px-1")}>
       {user.image ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -70,20 +105,26 @@ export function AccountChip() {
           {user.name?.[0]?.toUpperCase() ?? "?"}
         </div>
       )}
-      <span className="text-xs font-medium text-foreground/90">{user.name}</span>
-      <button
-        type="button"
-        onClick={handleSignOut}
-        disabled={signingOut}
-        className={cn(
-          "rounded-md p-1 text-muted-foreground hover:bg-card hover:text-foreground",
-          signingOut && "opacity-50",
-        )}
-        title="Sign out"
-        aria-label="Sign out"
-      >
-        <LogOut className="size-3.5" />
-      </button>
+      {!compact && (
+        <>
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground/90">
+            {user.name}
+          </span>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={signingOut}
+            className={cn(
+              "shrink-0 rounded-md p-1 text-muted-foreground hover:bg-card hover:text-foreground",
+              signingOut && "opacity-50",
+            )}
+            title="Sign out"
+            aria-label="Sign out"
+          >
+            <LogOut className="size-3.5" />
+          </button>
+        </>
+      )}
     </div>
   );
 }

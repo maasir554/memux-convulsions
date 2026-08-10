@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, PanelRight } from "lucide-react";
+import { PanelRight, Plus } from "lucide-react";
 
+import { ShellSidebar, useUnifiedShell } from "@/components/unified-shell";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useIndexerStore, useActiveGroup } from "@/lib/indexer/queue-store";
@@ -21,6 +21,8 @@ import { QueueSidebar } from "./queue-sidebar";
 export function MemuxIndexPage() {
   const router = useRouter();
   const load = useIndexerStore((s) => s.load);
+  const newDraft = useIndexerStore((s) => s.newDraft);
+  const { expandSidebar } = useUnifiedShell();
   // Toggle for the live-progress right pane. Only visible when the active
   // group also happens to be the in-flight run (the LiveView component
   // does its own gating on that as well).
@@ -53,16 +55,30 @@ export function MemuxIndexPage() {
   useWorksmithBridge();
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <>
+      <ShellSidebar
+        compact={
+          <button
+            type="button"
+            onClick={() => {
+              void newDraft();
+              expandSidebar();
+            }}
+            className="flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+            aria-label="New index"
+            title="New index"
+          >
+            <Plus className="size-4" />
+          </button>
+        }
+      >
+        <QueueSidebar />
+      </ShellSidebar>
+
+    <div className="flex h-full min-h-0 flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
-        <Link
-          href="/"
-          className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-        >
-          <ArrowLeft className="size-3.5" />
-          MEMUX
-        </Link>
-        <div className="text-sm font-medium">Indexer</div>
+        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Index</div>
+        <div className="text-sm font-medium">Knowledge builder</div>
         <div className="text-xs text-muted-foreground">
           Build searchable groups from files + context.
         </div>
@@ -96,11 +112,11 @@ export function MemuxIndexPage() {
       </header>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <QueueSidebar />
         <GroupEditor />
         <LiveView open={liveViewOpen} />
       </div>
       <DropOverlay />
     </div>
+    </>
   );
 }

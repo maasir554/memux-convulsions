@@ -66,10 +66,10 @@ export function QueueSidebar() {
   }, [groups]);
 
   return (
-    <aside className="flex h-full w-72 shrink-0 flex-col border-r bg-sidebar/30">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b px-3">
+    <aside className="flex h-full min-h-0 w-full flex-col bg-sidebar">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-sidebar-border px-3">
         <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Queue
+          Indexes
         </div>
         <button
           type="button"

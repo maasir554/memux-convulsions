@@ -17,7 +17,7 @@ export function StatusBar({ activeNote, backlinkCount }: StatusBarProps) {
           <span>{wordCount(activeNote.content)} words</span>
         </>
       ) : (
-        <span>galexy</span>
+        <span>MEMUX</span>
       )}
     </div>
   );

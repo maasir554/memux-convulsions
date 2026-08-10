@@ -1,96 +1,184 @@
+"use client";
+
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
-import { FilePlus, MessageSquare, FolderOpen, Users, FlaskConical } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  ArrowRight,
+  Files,
+  FolderSearch,
+  MessageSquare,
+  Send,
+  Sparkles,
+  Users,
+} from "lucide-react";
 
-import { AccountChip } from "@/components/auth/account-chip";
+import { ShellSidebar } from "@/components/unified-shell";
 import { cn } from "@/lib/utils";
+import { useStore } from "@/memux/chat/lib/store";
 
-const TILES = [
+const FEATURES = [
   {
     href: "/indexer",
-    label: "Index",
-    sub: "Drop files, add context, build a searchable index.",
-    Icon: FilePlus,
-    accent: "bg-amber-500/10 text-amber-400 ring-amber-500/20",
+    label: "Index knowledge",
+    sub: "Turn files and context into a searchable collection.",
+    Icon: Files,
+    tone: "text-amber-300 bg-amber-300/10",
   },
   {
     href: "/chat",
-    label: "Chat",
-    sub: "Talk to a local model. Streams from Plasma's backend.",
-    Icon: MessageSquare,
-    accent: "bg-emerald-500/10 text-emerald-400 ring-emerald-500/20",
+    label: "Ask MEMUX",
+    sub: "Think with your knowledge and a local or cloud model.",
+    Icon: Sparkles,
+    tone: "text-emerald-300 bg-emerald-300/10",
   },
   {
     href: "/vault",
-    label: "Browse",
-    sub: "Open the vault: notes, sheets, PDFs, graph.",
-    Icon: FolderOpen,
-    accent: "bg-violet-500/10 text-violet-400 ring-violet-500/20",
+    label: "Explore knowledge",
+    sub: "Move through notes, documents, links, and graphs.",
+    Icon: FolderSearch,
+    tone: "text-violet-300 bg-violet-300/10",
   },
   {
     href: "/teams",
-    label: "Teams",
-    sub: "Real-time chat spaces. Create one, or join with a code.",
+    label: "Work with a team",
+    sub: "Open a shared space and continue the conversation.",
     Icon: Users,
-    accent: "bg-sky-500/10 text-sky-400 ring-sky-500/20",
-  },
-  {
-    href: "/evals",
-    label: "Evaluate",
-    sub: "Run the fixed LoCoMo agent-memory benchmark live.",
-    Icon: FlaskConical,
-    accent: "bg-fuchsia-500/10 text-fuchsia-300 ring-fuchsia-500/20",
+    tone: "text-sky-300 bg-sky-300/10",
   },
 ] as const;
 
+const STARTERS = [
+  "Summarize what I worked on recently",
+  "Find connections across my notes",
+  "Help me plan my next project",
+];
+
 export default function MemuxHome() {
+  const router = useRouter();
+  const newChat = useStore((state) => state.newChat);
+  const chats = useStore((state) => state.chats);
+  const selectChat = useStore((state) => state.selectChat);
+  const [prompt, setPrompt] = useState("");
+
+  function startChat(text: string) {
+    const value = text.trim();
+    if (!value) return;
+    newChat();
+    window.sessionStorage.setItem("memux.pending-prompt", value);
+    router.push("/chat");
+  }
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    startChat(prompt);
+  }
+
   return (
-    <div className="relative flex flex-1 items-center justify-center bg-background p-8">
-      <div className="absolute top-4 right-6">
-        <AccountChip />
-      </div>
-      <div className="w-full max-w-4xl">
-        <div className="mb-10 text-center">
-          <p className="text-xs font-semibold tracking-[0.2em] text-muted-foreground uppercase">
-            MEMUX · convulsions
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-            Future of Work & Productivity
-          </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            One surface for the everyday tools you reach for. Pick where to go.
-          </p>
+    <>
+      <ShellSidebar>
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="border-b border-sidebar-border px-4 py-3">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Start here</div>
+            <div className="mt-1 text-sm font-medium">Your MEMUX workspace</div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            {FEATURES.map(({ href, label, Icon }) => (
+              <Link key={href} href={href} className="flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+                <Icon className="size-4" />
+                <span>{label}</span>
+                <ArrowRight className="ml-auto size-3 opacity-40" />
+              </Link>
+            ))}
+            {chats.length > 0 && (
+              <div className="mt-5">
+                <div className="px-2.5 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Recent chats</div>
+                {chats.slice(0, 5).map((chat) => (
+                  <button
+                    key={chat.id}
+                    type="button"
+                    onClick={() => {
+                      selectChat(chat.id);
+                      router.push("/chat");
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+                  >
+                    <MessageSquare className="size-3.5 shrink-0" />
+                    <span className="truncate">{chat.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
+      </ShellSidebar>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-5">
-          {TILES.map(({ href, label, sub, Icon, accent }) => (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "group flex flex-col gap-4 rounded-xl border bg-card p-6 text-card-foreground transition-colors",
-                "hover:border-foreground/30 hover:bg-card/80",
-              )}
-            >
-              <div
-                className={cn(
-                  "flex size-10 items-center justify-center rounded-lg ring-1 ring-inset",
-                  accent,
-                )}
+      <main className="relative min-h-0 flex-1 overflow-y-auto bg-background">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(circle_at_50%_-10%,color-mix(in_oklab,var(--foreground)_8%,transparent),transparent_64%)]" />
+        <div className="relative mx-auto flex min-h-full w-full max-w-6xl flex-col justify-center px-5 py-10 lg:px-10">
+          <div className="mx-auto max-w-2xl text-center">
+            <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
+              Your work, connected.
+            </h1>
+            <p className="mt-4 text-sm leading-6 text-muted-foreground sm:text-base">
+              Welcome back. What would you like to work on?
+            </p>
+          </div>
+
+          <form onSubmit={onSubmit} className="mx-auto mt-9 w-full max-w-3xl rounded-2xl border bg-card/80 p-2 shadow-[0_18px_70px_-32px_rgba(0,0,0,0.65)] backdrop-blur">
+            <div className="flex items-end gap-2">
+              <textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    startChat(prompt);
+                  }
+                }}
+                rows={2}
+                placeholder="Ask MEMUX anything about your work…"
+                aria-label="Start a conversation"
+                className="max-h-40 min-h-16 flex-1 resize-none bg-transparent px-3 py-3 text-sm outline-none placeholder:text-muted-foreground/70"
+              />
+              <button
+                type="submit"
+                disabled={!prompt.trim()}
+                className="mb-1 flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background transition-opacity disabled:opacity-30"
+                aria-label="Start chat"
               >
-                <Icon className="size-5" />
-              </div>
-              <div className="space-y-1">
-                <div className="text-base font-medium">{label}</div>
-                <div className="text-xs text-muted-foreground">{sub}</div>
-              </div>
-            </Link>
-          ))}
-        </div>
+                <Send className="size-4" />
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5 border-t px-2 pt-2 pb-1">
+              {STARTERS.map((starter) => (
+                <button key={starter} type="button" onClick={() => startChat(starter)} className="rounded-full border px-2.5 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground">
+                  {starter}
+                </button>
+              ))}
+            </div>
+          </form>
 
-        <div className="mt-8 text-center text-[10px] tracking-wide text-muted-foreground/70 uppercase">
-          galexy · plasma · worksmith
+          <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {FEATURES.map(({ href, label, sub, Icon, tone }) => (
+              <Link
+                key={href}
+                href={href}
+                className="group rounded-2xl border bg-card/55 p-4 transition-all hover:-translate-y-0.5 hover:border-foreground/25 hover:bg-card"
+              >
+                <div className={cn("flex size-9 items-center justify-center rounded-xl", tone)}>
+                  <Icon className="size-4" />
+                </div>
+                <div className="mt-4 flex items-center gap-2 text-sm font-medium">
+                  {label}
+                  <ArrowRight className="size-3.5 opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-60" />
+                </div>
+                <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{sub}</p>
+              </Link>
+            ))}
+          </div>
         </div>
-      </div>
-    </div>
+      </main>
+    </>
   );
 }

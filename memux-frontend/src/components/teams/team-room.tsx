@@ -28,7 +28,6 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Copy,
@@ -51,6 +50,8 @@ import { useSession } from "@/lib/auth/client";
 import { attachmentUrl, teamsApi, ApiError } from "@/lib/teams/api";
 import { useTeamRoom } from "@/lib/teams/use-team-room";
 import { AttachmentModal } from "@/components/teams/attachment-modal";
+import { ShellSidebar, useUnifiedShell } from "@/components/unified-shell";
+import { TeamsAccessState } from "@/components/teams/teams-access-state";
 
 // Lazy-load: react-pdf is ~600KB minified; we only ever need it when the
 // chat actually contains a PDF attachment.
@@ -83,18 +84,26 @@ import {
 import { cn } from "@/lib/utils";
 
 export function TeamRoom({ teamId }: { teamId: string }) {
-  const router = useRouter();
+  const { backendAvailable } = useUnifiedShell();
+
+  if (backendAvailable !== true) {
+    return (
+      <TeamsAccessState
+        next={`/teams/${teamId}`}
+        pending={backendAvailable === null}
+        backendAvailable={backendAvailable !== false}
+      />
+    );
+  }
+
+  return <ConnectedTeamRoom teamId={teamId} />;
+}
+
+function ConnectedTeamRoom({ teamId }: { teamId: string }) {
   const { data: session, isPending: sessionPending } = useSession();
 
   const [detail, setDetail] = useState<TeamDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
-
-  // Auth gate.
-  useEffect(() => {
-    if (!sessionPending && !session?.user) {
-      router.replace(`/login?next=/teams/${teamId}`);
-    }
-  }, [sessionPending, session?.user, router, teamId]);
 
   // Initial team detail (members + role).
   useEffect(() => {
@@ -120,13 +129,8 @@ export function TeamRoom({ teamId }: { teamId: string }) {
 
   const room = useTeamRoom(detail ? teamId : null);
 
-  if (sessionPending || !session?.user) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <Loader2 className="size-5 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+  if (sessionPending) return <TeamsAccessState next={`/teams/${teamId}`} pending />;
+  if (!session?.user) return <TeamsAccessState next={`/teams/${teamId}`} />;
 
   if (detailError) {
     return (
@@ -220,6 +224,32 @@ function RoomShell({
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
+      <ShellSidebar
+        compact={
+          <Link href="/teams" className="flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground" aria-label="All teams" title="All teams">
+            <Users className="size-4" />
+          </Link>
+        }
+      >
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="border-b border-sidebar-border p-3">
+            <Link href="/teams" className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground hover:text-foreground">← All teams</Link>
+            <div className="mt-2 truncate text-sm font-medium">{team.name}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">{team.members.length} member{team.members.length === 1 ? "" : "s"}</div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            <div className="px-2.5 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">People</div>
+            {team.members.map((member) => (
+              <div key={member.userId} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground">
+                <span className={cn("size-2 rounded-full", room.presence.has(member.userId) ? "bg-emerald-400" : "bg-muted-foreground/30")} />
+                <span className="min-w-0 flex-1 truncate">{member.name}</span>
+                <span className="text-[9px] uppercase opacity-50">{member.role}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </ShellSidebar>
+
       {/* Header */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <Link

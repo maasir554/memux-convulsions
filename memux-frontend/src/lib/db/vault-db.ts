@@ -41,6 +41,20 @@ export type VaultDb = PgliteDatabase<Schema>;
 
 let dbPromise: Promise<VaultDb> | null = null;
 
+const LEGACY_WELCOME_CONTENT = `# Welcome to galexy
+
+This is a graph-based notebook, inspired by [[MEMUX]] and Obsidian.
+
+## Get started
+- Open notes from the file explorer on the left
+- Follow a link like [[Graph View]] or [[Zettelkasten]]
+- Watch the **Backlinks** panel on the right update as you browse
+
+> [!note] Tip
+> Everything here is mock data for the shell. Real editing comes next.
+
+#start`;
+
 /** Lazily create (once) the PGlite-backed, IndexedDB-persisted vault DB. */
 export function getVaultDb(): Promise<VaultDb> {
   if (!dbPromise) dbPromise = create();
@@ -113,6 +127,25 @@ async function applyContentUpgrades(db: VaultDb): Promise<void> {
       .update(items)
       .set({ content: seed.content, updatedAt: new Date() })
       .where(and(eq(items.id, seed.id), eq(items.content, "")));
+  }
+
+  // Carry existing untouched starter vaults into the unified MEMUX language.
+  // Exact-content matching protects anyone who has edited their Welcome note.
+  const welcome = NOTES.find((seed) => seed.id === "welcome");
+  if (welcome) {
+    await db
+      .update(items)
+      .set({
+        content: welcome.content,
+        summary: welcome.summary,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(items.id, welcome.id),
+          eq(items.content, LEGACY_WELCOME_CONTENT),
+        ),
+      );
   }
 }
 

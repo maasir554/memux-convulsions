@@ -27,7 +27,6 @@ import {
 } from "@/components/galexy/file-explorer";
 import { GraphView } from "@/components/galexy/graph-view";
 import { CreateItemDialog } from "@/components/galexy/create-item-dialog";
-import type { LeftView } from "@/components/galexy/ribbon";
 import {
   buildNestedTree,
   type FolderNode,
@@ -43,15 +42,17 @@ type CreateNoteInput = {
   language?: string;
 };
 
+export type LeftView = "files" | "search" | "graph";
+
 type LeftSidebarProps = {
   view: LeftView;
   notes: Note[];
-  items: Note[];
   folderNames: string[];
   activeId: string;
   onOpen: (id: string) => void;
   query: string;
   onQueryChange: (value: string) => void;
+  items: Note[];
   edges: GraphEdge[];
   backlinkCount: Record<string, number>;
   onCreateNote: (input: CreateNoteInput) => void | Promise<void>;
@@ -71,7 +72,7 @@ type LeftSidebarProps = {
 };
 
 const VIEW_TITLES: Record<LeftView, string> = {
-  files: "Galexy Vault",
+  files: "Files",
   search: "Search",
   graph: "Graph view",
 };
@@ -134,12 +135,12 @@ function descendantKeys(node: FolderNode): SelectionKey[] {
 export function LeftSidebar({
   view,
   notes,
-  items,
   folderNames,
   activeId,
   onOpen,
   query,
   onQueryChange,
+  items,
   edges,
   backlinkCount,
   onCreateNote,

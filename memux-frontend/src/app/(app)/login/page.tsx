@@ -13,10 +13,12 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 import { authClient, useSession } from "@/lib/auth/client";
+import { useUnifiedShell } from "@/components/unified-shell";
 
 /**
  * The page is wrapped in <Suspense> because `useSearchParams()` triggers a
@@ -27,9 +29,36 @@ import { authClient, useSession } from "@/lib/auth/client";
 export default function LoginPage() {
   return (
     <Suspense fallback={<LoginShell pending />}>
-      <LoginForm />
+      <LoginGate />
     </Suspense>
   );
+}
+
+function LoginGate() {
+  const { backendAvailable } = useUnifiedShell();
+
+  if (backendAvailable === null) return <LoginShell pending />;
+  if (!backendAvailable) {
+    return (
+      <LoginShell>
+        <div className="rounded-xl border bg-card p-4 text-center">
+          <p className="text-sm font-medium">Sign-in service is offline</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Start the MEMUX backend to sign in and use shared Teams spaces.
+            Your local workspace is still available.
+          </p>
+          <Link
+            href="/"
+            className="mt-4 inline-flex h-9 items-center justify-center rounded-lg border px-4 text-xs font-medium hover:bg-background"
+          >
+            Return to workspace
+          </Link>
+        </div>
+      </LoginShell>
+    );
+  }
+
+  return <LoginForm />;
 }
 
 function LoginForm() {

@@ -8,19 +8,22 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 
 /** Minimal dark/light toggle that flips the `dark` class on <html>. */
 export function ThemeToggle() {
-  const [dark, setDark] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true; // matches <html class="dark">
-    return (localStorage.getItem("galexy-theme") ?? "dark") === "dark";
-  });
+  // Start from the root layout's server-rendered dark theme so the icon and
+  // DOM hydrate identically, then restore the user's preference after mount.
+  const [dark, setDark] = useState(true);
 
-  // Sync the external systems (DOM class + storage) when the choice changes.
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem("galexy-theme", dark ? "dark" : "light");
-  }, [dark]);
+    const restored = (localStorage.getItem("galexy-theme") ?? "dark") === "dark";
+    document.documentElement.classList.toggle("dark", restored);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDark(restored);
+  }, []);
 
   function toggle() {
-    setDark((value) => !value);
+    const next = !dark;
+    setDark(next);
+    document.documentElement.classList.toggle("dark", next);
+    localStorage.setItem("galexy-theme", next ? "dark" : "light");
   }
 
   return (

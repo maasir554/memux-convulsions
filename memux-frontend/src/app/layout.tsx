@@ -15,9 +15,9 @@ const fontMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "galexy — graph notes",
+  title: "MEMUX — connected work",
   description:
-    "A graph-based notebook for students, researchers, and early professionals. Part of MEMUX by team convulsions.",
+    "One connected workspace for knowledge, AI, indexing, and teams.",
 };
 
 export default function RootLayout({
