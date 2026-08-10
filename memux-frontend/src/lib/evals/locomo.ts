@@ -11,7 +11,10 @@ export const LOCOMO_SEED = "memux-locomo-v1";
 export const LOCOMO_DATASET_SHA256 =
   "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4";
 export const DEFAULT_LOCOMO_MODEL = "gemma-4-31b-it";
-export const LOCOMO_TOP_K = 8;
+export const LOCOMO_METHOD = "memux-rag-v2";
+export const LOCOMO_TOP_K = 12;
+export const LOCOMO_HIGHLIGHT_TURNS = 20;
+export const LOCOMO_CONTEXT_CHAR_BUDGET = 42_000;
 
 export const CATEGORY_LABELS: Record<number, string> = {
   1: "Multi-hop",
@@ -65,6 +68,8 @@ export type LocomoItemResult = LocomoQuestion & {
   prediction: string;
   f1: number;
   retrievedSessions: number[];
+  highlightedTurns: string[];
+  abstentionRetried: boolean;
   evidenceRecall: number;
   latencyMs: number;
   error?: string;
@@ -87,12 +92,20 @@ export type LocomoEvent =
       type: "start";
       total: number;
       model: string;
+      method: string;
+      pending: number;
       seed: string;
       datasetSha256: string;
       categoryCounts: Record<string, number>;
     }
   | { type: "item"; index: number; result: LocomoItemResult; summary: LocomoSummary }
-  | { type: "complete"; summary: LocomoSummary; results: LocomoItemResult[] }
+  | {
+      type: "complete";
+      model: string;
+      method: string;
+      summary: LocomoSummary;
+      results: LocomoItemResult[];
+    }
   | { type: "error"; message: string };
 
 const DATA = locomoData as unknown as LocomoSample[];
@@ -160,6 +173,7 @@ export function getFixedLocomoSubset(): LocomoQuestion[] {
 type SearchRecord = {
   id: string;
   session: number;
+  kind: "session" | "turn";
   text: string;
 };
 
@@ -170,9 +184,16 @@ type SessionDoc = {
   text: string;
 };
 
+type RetrievedMemory = {
+  sessions: SessionDoc[];
+  highlights: Array<{ session: number; date: string; turn: Turn }>;
+  queryVariants: string[];
+};
+
 class ConversationMemory {
   readonly sessions: SessionDoc[];
   private readonly search: MiniSearch<SearchRecord>;
+  private readonly turns = new Map<string, { session: number; date: string; turn: Turn }>();
 
   constructor(private readonly sample: LocomoSample) {
     this.sessions = buildSessions(sample);
@@ -181,12 +202,19 @@ class ConversationMemory {
       records.push({
         id: `s${session.number}-memory`,
         session: session.number,
+        kind: "session",
         text: session.text,
       });
       for (const turn of session.turns) {
+        this.turns.set(turn.dia_id, {
+          session: session.number,
+          date: session.date,
+          turn,
+        });
         records.push({
           id: turn.dia_id,
           session: session.number,
+          kind: "turn",
           text: `${session.date} ${turn.speaker}: ${turn.text} ${turn.blip_caption ?? ""}`,
         });
       }
@@ -194,25 +222,136 @@ class ConversationMemory {
     this.search = new MiniSearch<SearchRecord>({
       idField: "id",
       fields: ["text"],
-      storeFields: ["session"],
+      storeFields: ["session", "kind"],
     });
     this.search.addAll(records);
   }
 
-  retrieve(question: string, topK = LOCOMO_TOP_K): SessionDoc[] {
-    const hits = this.search.search(question, { prefix: true, fuzzy: 0.12 });
+  retrieve(question: string, topK = LOCOMO_TOP_K): RetrievedMemory {
+    const queryVariants = buildQueryVariants(question);
+    const primaryHits = this.search.search(queryVariants[0]!, {
+      prefix: true,
+      fuzzy: 0.12,
+    });
     const scores = new Map<number, number>();
-    for (const hit of hits.slice(0, 80)) {
+    for (const hit of primaryHits.slice(0, 80)) {
       const session = Number(hit.session);
       const rankBonus = 1 / (1 + scores.size);
       scores.set(session, (scores.get(session) ?? 0) + hit.score + rankBonus);
     }
-    return [...scores.entries()]
+
+    // Query expansion has a deliberately smaller influence than the original
+    // question. It recovers sessions containing individual facets of list and
+    // multi-hop questions without letting a terse expansion replace the user's
+    // actual intent.
+    for (const variant of queryVariants.slice(1)) {
+      const hits = this.search.search(variant, { prefix: true, fuzzy: 0.12 });
+      hits.slice(0, 40).forEach((hit, rank) => {
+        const session = Number(hit.session);
+        scores.set(session, (scores.get(session) ?? 0) + 2 / (8 + rank));
+      });
+    }
+
+    const rankedSessions = [...scores.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, topK)
-      .map(([number]) => this.sessions.find((session) => session.number === number)!)
-      .sort((a, b) => a.number - b.number);
+      .map(([number]) => this.sessions.find((session) => session.number === number)!);
+
+    // A few LoCoMo sessions are much longer than average. Twelve full sessions
+    // plus repeated highlights can exceed Google's 16K free-tier input-token
+    // window in a single request, which no retry can fix. Always keep the top
+    // eight (the v1 baseline envelope), then add lower-ranked candidates while
+    // staying under a conservative character budget.
+    const contextSessions: SessionDoc[] = [];
+    let contextChars = 0;
+    for (const session of rankedSessions) {
+      const sessionChars =
+        session.date.length +
+        session.turns.reduce(
+          (sum, turn) => sum + turn.speaker.length + turn.text.length + (turn.blip_caption?.length ?? 0) + 24,
+          0,
+        );
+      if (contextSessions.length < 8 || contextChars + sessionChars <= LOCOMO_CONTEXT_CHAR_BUDGET) {
+        contextSessions.push(session);
+        contextChars += sessionChars;
+      }
+    }
+    const sessions = contextSessions.sort((a, b) => a.number - b.number);
+    const selectedSessions = new Set(sessions.map((session) => session.number));
+
+    // RRF across the original and expanded searches produces a compact
+    // evidence shortlist. These turns are repeated before the full sessions so
+    // the answer model sees needle facts before scanning the longer context.
+    const turnScores = new Map<string, number>();
+    for (const variant of queryVariants) {
+      const hits = this.search.search(variant, { prefix: true, fuzzy: 0.12 });
+      hits
+        .filter((hit) => hit.kind === "turn" && selectedSessions.has(Number(hit.session)))
+        .slice(0, 60)
+        .forEach((hit, rank) => {
+          const id = String(hit.id);
+          turnScores.set(id, (turnScores.get(id) ?? 0) + 1 / (20 + rank));
+        });
+    }
+    const highlights = [...turnScores.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, LOCOMO_HIGHLIGHT_TURNS)
+      .map(([id]) => this.turns.get(id)!)
+      .filter(Boolean);
+
+    return { sessions, highlights, queryVariants };
   }
+}
+
+const QUERY_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "before",
+  "both",
+  "did",
+  "do",
+  "does",
+  "during",
+  "for",
+  "from",
+  "has",
+  "have",
+  "how",
+  "in",
+  "is",
+  "it",
+  "of",
+  "on",
+  "the",
+  "their",
+  "they",
+  "to",
+  "was",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "with",
+  "would",
+]);
+
+function buildQueryVariants(question: string): string[] {
+  const stripped = question
+    .replace(/[^\p{L}\p{N}\s'-]/gu, " ")
+    .split(/\s+/)
+    .filter((word) => word && !QUERY_STOP_WORDS.has(word.toLowerCase()))
+    .join(" ");
+  const namedEntities =
+    question.match(/\b[A-Z][\p{L}\p{M}'-]*(?:\s+[A-Z][\p{L}\p{M}'-]*)*/gu)?.join(" ") ?? "";
+  const variants = [question.trim(), stripped.trim(), namedEntities.trim()].filter(
+    (value) => value.length >= 3,
+  );
+  return [...new Set(variants)];
 }
 
 function buildSessions(sample: LocomoSample): SessionDoc[] {
@@ -257,8 +396,21 @@ function memoryFor(sampleId: string): ConversationMemory {
   return memory;
 }
 
-function formatContext(sessions: SessionDoc[]): string {
-  return sessions
+function formatContext(memory: RetrievedMemory): string {
+  const highlights = memory.highlights.length
+    ? `# Highest-relevance dialogue turns\n${memory.highlights
+        .map(
+          ({ session, date, turn }) =>
+            `[Session ${session} · ${date} · ${turn.dia_id}] ${turn.speaker}: ${turn.text}${
+              turn.blip_caption ? ` [Image: ${turn.blip_caption}]` : ""
+            }`,
+        )
+        .join("\n")}\n\n`
+    : "";
+  const chronology = `# Session chronology\n${memory.sessions
+    .map((session) => `Session ${session.number}: ${session.date}`)
+    .join("\n")}\n\n`;
+  const sessions = memory.sessions
     .map(
       (session) =>
         `## Session ${session.number} — ${session.date}\n${session.turns
@@ -271,6 +423,7 @@ function formatContext(sessions: SessionDoc[]): string {
           .join("\n")}`,
     )
     .join("\n\n");
+  return `${highlights}${chronology}# Retrieved sessions\n${sessions}`;
 }
 
 function responseText(response: unknown): string {
@@ -287,62 +440,116 @@ export async function evaluateLocomoQuestion(
 ): Promise<LocomoItemResult> {
   const started = Date.now();
   const memory = memoryFor(question.sampleId);
-  const sessions = memory.retrieve(question.question);
-  const retrievedSessions = sessions.map((session) => session.number);
+  const retrieved = memory.retrieve(question.question);
+  const retrievedSessions = retrieved.sessions.map((session) => session.number);
+  const highlightedTurns = retrieved.highlights.map(({ turn }) => turn.dia_id);
   const provider = await getProvider();
 
+  const context = formatContext(retrieved);
+  const systemPrompt =
+    "You answer questions about a long-running conversation from retrieved memory. " +
+    "First inspect the highest-relevance turns, then verify against the full retrieved sessions. " +
+    "Prefer the conversation's exact wording, names, titles, quantities, places, and dates over paraphrases. " +
+    "For list or shared-interest questions, search across every retrieved session and return every distinct item as a comma-separated list. " +
+    "For when, where, order, or duration questions, match the exact subject and event, use the session chronology, and resolve relative dates before answering; never substitute a different event. " +
+    "For questions asking what is likely, suspected, implied, or would happen, make the most grounded inference supported by the memory and ordinary common knowledge. " +
+    "Give only the shortest direct answer. Do not explain, cite, hedge, or repeat the question. " +
+    "Say 'no information available' only after checking both the highlighted turns and all retrieved sessions.";
+  const userPrompt = `Retrieved conversation memory:\n\n${context}\n\nQuestion: ${question.question}\nAnswer:`;
+
+  const first = await chatWithQuotaRetry(
+    provider,
+    { model, systemPrompt, userPrompt, maxTokens: 128 },
+    signal,
+  );
+  if (first.error) {
+    return {
+      ...question,
+      prediction: "",
+      f1: 0,
+      retrievedSessions,
+      highlightedTurns,
+      abstentionRetried: false,
+      evidenceRecall: evidenceRecall(question.evidence, retrieved.sessions),
+      latencyMs: Date.now() - started,
+      error: first.error,
+    };
+  }
+
+  let prediction = first.text;
+  let abstentionRetried = false;
+  if (isAbstention(prediction) && retrieved.highlights.length > 0) {
+    abstentionRetried = true;
+    const retry = await chatWithQuotaRetry(
+      provider,
+      {
+        model,
+        systemPrompt,
+        userPrompt:
+          `${userPrompt}\n\nYour first attempt abstained. Re-examine the highlighted turns and full sessions carefully. ` +
+          "If an answer can be extracted or reasonably inferred, return it using the conversation's exact wording. Abstain only if genuinely unsupported.",
+        maxTokens: 128,
+      },
+      signal,
+    );
+    if (!retry.error && retry.text) prediction = retry.text;
+  }
+
+  return {
+    ...question,
+    prediction,
+    f1: scoreLocomoAnswer(prediction, question.answer, question.category),
+    retrievedSessions,
+    highlightedTurns,
+    abstentionRetried,
+    evidenceRecall: evidenceRecall(question.evidence, retrieved.sessions),
+    latencyMs: Date.now() - started,
+  };
+}
+
+type ChatProvider = Awaited<ReturnType<typeof getProvider>>;
+
+async function chatWithQuotaRetry(
+  provider: ChatProvider,
+  options: {
+    model: string;
+    systemPrompt: string;
+    userPrompt: string;
+    maxTokens: number;
+  },
+  signal: AbortSignal,
+): Promise<{ text: string; error?: string }> {
   let lastError = "";
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
       const response = await provider.chat(
         {
-          model,
+          model: options.model,
           temperature: 0,
-          max_tokens: 96,
+          max_tokens: options.maxTokens,
           think: false,
           messages: [
-            {
-              role: "system",
-              content:
-                "You answer questions about a long-running conversation using only the retrieved memory. " +
-                "Resolve relative dates from the session timestamps. Give only the shortest direct answer; " +
-                "do not explain, cite, hedge, or repeat the question. If the memory truly lacks the answer, say: no information available.",
-            },
-            {
-              role: "user",
-              content: `Retrieved conversation memory:\n\n${formatContext(sessions)}\n\nQuestion: ${question.question}\nAnswer:`,
-            },
+            { role: "system", content: options.systemPrompt },
+            { role: "user", content: options.userPrompt },
           ],
         },
         signal,
       );
-      const prediction = responseText(response);
-      return {
-        ...question,
-        prediction,
-        f1: scoreLocomoAnswer(prediction, question.answer, question.category),
-        retrievedSessions,
-        evidenceRecall: evidenceRecall(question.evidence, sessions),
-        latencyMs: Date.now() - started,
-      };
+      return { text: responseText(response) };
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
       if (signal.aborted || !/\b429\b|quota|resource_exhausted/i.test(lastError)) break;
-      // The free-tier response normally asks for 20–30 seconds. Waiting here,
-      // instead of turning a transport error into a zero, preserves score
-      // validity and lets the same run continue when the minute window resets.
-      await abortableDelay(30_000, signal);
+      // Google reports a sliding per-minute input-token quota and can request
+      // 50+ seconds near the start of that window. Clear the full minute
+      // instead of repeatedly landing inside the same quota window.
+      await abortableDelay(65_000, signal);
     }
   }
-  return {
-    ...question,
-    prediction: "",
-    f1: 0,
-    retrievedSessions,
-    evidenceRecall: evidenceRecall(question.evidence, sessions),
-    latencyMs: Date.now() - started,
-    error: lastError || "Model call failed",
-  };
+  return { text: "", error: lastError || "Model call failed" };
+}
+
+function isAbstention(value: string): boolean {
+  return /no information available|not mentioned|not enough information|cannot determine/i.test(value);
 }
 
 function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
@@ -457,13 +664,21 @@ export async function runLocomoEvaluation(options: {
   model?: string;
   concurrency?: number;
   signal?: AbortSignal;
+  existingResults?: LocomoItemResult[];
   onEvent?: (event: LocomoEvent) => void | Promise<void>;
 }): Promise<{ summary: LocomoSummary; results: LocomoItemResult[] }> {
   const model = options.model ?? DEFAULT_LOCOMO_MODEL;
   const questions = getFixedLocomoSubset();
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, 8));
   const started = Date.now();
-  const results: LocomoItemResult[] = [];
+  const questionIds = new Set(questions.map((question) => question.id));
+  const results = (options.existingResults ?? []).filter(
+    (result) => questionIds.has(result.id) && !result.error && Boolean(result.prediction),
+  );
+  const completedIds = new Set(results.map((result) => result.id));
+  const pending = questions
+    .map((question, index) => ({ question, index }))
+    .filter(({ question }) => !completedIds.has(question.id));
   const categoryCounts = Object.fromEntries(
     [1, 2, 3, 4].map((category) => [
       String(category),
@@ -474,6 +689,8 @@ export async function runLocomoEvaluation(options: {
     type: "start",
     total: questions.length,
     model,
+    method: LOCOMO_METHOD,
+    pending: pending.length,
     seed: LOCOMO_SEED,
     datasetSha256: LOCOMO_DATASET_SHA256,
     categoryCounts,
@@ -483,9 +700,9 @@ export async function runLocomoEvaluation(options: {
   const workers = Array.from({ length: concurrency }, async () => {
     while (true) {
       if (options.signal?.aborted) return;
-      const index = cursor++;
-      const question = questions[index];
-      if (!question) return;
+      const next = pending[cursor++];
+      if (!next) return;
+      const { question, index } = next;
       const result = await evaluateLocomoQuestion(question, model, options.signal);
       results.push(result);
       const summary = summarizeLocomo(results, questions.length, Date.now() - started);
@@ -497,6 +714,12 @@ export async function runLocomoEvaluation(options: {
     (a, b) => questions.findIndex((q) => q.id === a.id) - questions.findIndex((q) => q.id === b.id),
   );
   const summary = summarizeLocomo(ordered, questions.length, Date.now() - started);
-  await options.onEvent?.({ type: "complete", summary, results: ordered });
+  await options.onEvent?.({
+    type: "complete",
+    model,
+    method: LOCOMO_METHOD,
+    summary,
+    results: ordered,
+  });
   return { summary, results: ordered };
 }

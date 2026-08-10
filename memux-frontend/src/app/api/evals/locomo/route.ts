@@ -2,15 +2,19 @@ import {
   DEFAULT_LOCOMO_MODEL,
   runLocomoEvaluation,
   type LocomoEvent,
+  type LocomoItemResult,
 } from "@/lib/evals/locomo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 3600;
+// Vercel Hobby validates every App Router function at build time and caps
+// execution at 300 seconds, even when this evaluation route is never called.
+export const maxDuration = 300;
 
 type RequestBody = {
   model?: string;
   concurrency?: number;
+  previousResults?: LocomoItemResult[];
 };
 
 export async function POST(request: Request): Promise<Response> {
@@ -27,6 +31,9 @@ export async function POST(request: Request): Promise<Response> {
   let closed = false;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
+      const heartbeat = setInterval(() => {
+        if (!closed) controller.enqueue(encoder.encode(": keepalive\n\n"));
+      }, 15_000);
       const emit = (event: LocomoEvent) => {
         if (closed) return;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
@@ -34,6 +41,7 @@ export async function POST(request: Request): Promise<Response> {
       void runLocomoEvaluation({
         model: body.model || DEFAULT_LOCOMO_MODEL,
         concurrency: body.concurrency,
+        existingResults: body.previousResults,
         signal: runController.signal,
         onEvent: emit,
       })
@@ -45,6 +53,7 @@ export async function POST(request: Request): Promise<Response> {
           });
         })
         .finally(() => {
+          clearInterval(heartbeat);
           if (!closed) {
             closed = true;
             controller.close();

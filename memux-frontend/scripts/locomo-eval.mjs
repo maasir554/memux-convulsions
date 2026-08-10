@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import process from "node:process";
 
 const baseUrl = process.env.MEMUX_URL || "http://localhost:3000";
 const concurrency = Number(process.env.LOCOMO_CONCURRENCY || 4);
+const resumePath = process.env.LOCOMO_RESUME;
+const previousResults = resumePath
+  ? JSON.parse(await readFile(resumePath, "utf8")).results
+  : undefined;
 const response = await fetch(`${baseUrl}/api/evals/locomo`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ concurrency }),
+  body: JSON.stringify({ concurrency, previousResults }),
 });
 
 if (!response.ok || !response.body) {
@@ -24,8 +28,9 @@ let complete;
 function progress(event) {
   if (event.type === "start") {
     console.log(
-      `LoCoMo fixed-${event.total} · ${event.model} · ${concurrency} workers\n` +
-        `seed=${event.seed} dataset=${event.datasetSha256.slice(0, 12)}…`,
+      `LoCoMo fixed-${event.total} · ${event.model} · ${event.method} · ${concurrency} workers\n` +
+        `seed=${event.seed} dataset=${event.datasetSha256.slice(0, 12)}… ` +
+        `pending=${event.pending}`,
     );
   } else if (event.type === "item") {
     const { summary, result } = event;

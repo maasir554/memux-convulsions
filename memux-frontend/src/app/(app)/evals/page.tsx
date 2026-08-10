@@ -275,7 +275,7 @@ export default function EvalsPage() {
 
         <footer className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-[10px] tracking-wide text-zinc-600 uppercase">
           <span>Seed · memux-locomo-v1</span>
-          <span>Retriever · BM25 session memory, top 8</span>
+          <span>Retriever · 12 candidates + adaptive context reranking</span>
           <span>Dataset · official LoCoMo-10</span>
           <span>Adversarial questions excluded</span>
         </footer>
