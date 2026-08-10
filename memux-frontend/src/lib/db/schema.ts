@@ -121,11 +121,17 @@ export type SectionTransition = "continue" | "end" | "new";
 export type IndexerFileRef = {
   /** Stable id used to address the file inside the run; not the items.id. */
   id: string;
+  /** Omitted on legacy attachments; those are treated as regular files. */
+  sourceKind?: "file" | "text";
   name: string;
   size: number;
   mimeType: string;
   /** OPFS blob_key once the file has been uploaded to OPFS. Null while still in draft (browser File). */
   blobKey?: string | null;
+  /** Optional user heading for a pasted-text source. */
+  heading?: string;
+  /** Inline body for a pasted-text source; avoids an unnecessary OPFS blob. */
+  inlineText?: string;
 };
 
 /**

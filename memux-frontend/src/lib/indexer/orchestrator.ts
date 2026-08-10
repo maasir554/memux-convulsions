@@ -154,7 +154,7 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
 
   try {
     await setStatus(runId, "preparing");
-    await scratch(runId, `## Run started\n- Files: ${group.files.length}\n- Will auto-name: ${userProvidedName ? "no" : "yes"}`);
+    await scratch(runId, `## Run started\n- Sources: ${group.files.length}\n- Will auto-name: ${userProvidedName ? "no" : "yes"}`);
     const folder = planIndexFolders(groupName);
     await store.getState().applyStatus(runId, "preparing", { folderName: folder });
 
@@ -200,7 +200,7 @@ export async function runOne(group: Group, hooks: RunHooks = {}): Promise<void> 
     for (let fileIdx = 0; fileIdx < group.files.length; fileIdx++) {
       const fileRef = group.files[fileIdx];
       if (signal?.aborted) throw new Error("Cancelled");
-      await scratch(runId, `\n### File: ${fileRef.name}`);
+      await scratch(runId, `\n### Source: ${fileRef.name}`);
       live.getState().startFile(fileRef.name, fileIdx);
       live.getState().pushAction(`Opening ${fileRef.name}`);
       const file = await fileFromRef(fileRef);
@@ -862,4 +862,3 @@ async function embedSectionChunks(
   }
   void indexChunks; // referenced for the schema type
 }
-

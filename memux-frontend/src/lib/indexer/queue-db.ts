@@ -119,7 +119,11 @@ export async function attachFiles(id: string, files: File[]): Promise<void> {
   if (!EDITABLE.has(row.status)) {
     throw new Error(`Cannot attach files in status ${row.status}`);
   }
-  const seen = new Set(row.files.map((f) => `${f.name}:${f.size}`));
+  const seen = new Set(
+    row.files
+      .filter((f) => f.sourceKind !== "text")
+      .map((f) => `${f.name}:${f.size}`),
+  );
   const next: IndexerFileRef[] = [...row.files];
   for (const file of files) {
     const key = `${file.name}:${file.size}`;
@@ -135,6 +139,7 @@ export async function attachFiles(id: string, files: File[]): Promise<void> {
     }
     next.push({
       id: refId,
+      sourceKind: "file",
       name: file.name,
       size: file.size,
       mimeType: file.type || "application/octet-stream",
@@ -222,7 +227,12 @@ export async function enqueue(id: string): Promise<void> {
   if (row.status !== "draft") {
     throw new Error(`Cannot enqueue: status=${row.status}`);
   }
-  if (row.files.length === 0) {
+  const indexableSources = row.files.filter(
+    (source) =>
+      source.sourceKind !== "text" ||
+      (source.inlineText?.trim().length ?? 0) > 0,
+  );
+  if (indexableSources.length === 0) {
     throw new Error("Cannot enqueue an empty group");
   }
   const [{ maxPos }] = await db
@@ -231,7 +241,11 @@ export async function enqueue(id: string): Promise<void> {
     .where(eq(indexRuns.status, "queued"));
   await db
     .update(indexRuns)
-    .set({ status: "queued", queuePosition: Number(maxPos) + 1 })
+    .set({
+      files: indexableSources,
+      status: "queued",
+      queuePosition: Number(maxPos) + 1,
+    })
     .where(eq(indexRuns.id, id));
 }
 
@@ -331,4 +345,3 @@ export async function appendScratch(id: string, line: string): Promise<void> {
     })
     .where(eq(indexRuns.id, id));
 }
-

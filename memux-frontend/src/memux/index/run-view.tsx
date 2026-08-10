@@ -278,7 +278,7 @@ export function FilesSection({ files }: { files: IndexerFileRef[] }) {
     <>
       <CollapsibleSection
         icon={<FilesIcon className="size-4" />}
-        title="Files"
+        title="Sources"
         count={files.length}
       >
         <div className="max-h-60 overflow-y-auto px-2 py-1.5">
@@ -502,12 +502,13 @@ function parseScratchpad(md: string): ScratchEvent[] {
     if (!line) continue;
 
     if (line === "## Run started") {
-      // Following lines like "- Files: 8" / "- Will auto-name: yes"
+      // Following lines like "- Sources: 8" / "- Will auto-name: yes".
+      // Keep accepting "Files" so active runs created by older builds render.
       let files = 0;
       let autoName = false;
       while (i + 1 < lines.length && lines[i + 1].startsWith("-")) {
         const next = lines[i + 1].trim();
-        const fm = /Files: (\d+)/.exec(next);
+        const fm = /(?:Sources|Files): (\d+)/.exec(next);
         if (fm) files = Number(fm[1]);
         if (/auto-name: yes/.test(next)) autoName = true;
         i++;
@@ -516,7 +517,7 @@ function parseScratchpad(md: string): ScratchEvent[] {
       continue;
     }
     let m: RegExpExecArray | null;
-    if ((m = /^### File: (.+)$/.exec(line))) {
+    if ((m = /^### (?:Source|File): (.+)$/.exec(line))) {
       out.push({ kind: "file", name: m[1] });
       continue;
     }
@@ -666,7 +667,7 @@ function EventRow({ event }: { event: ScratchEvent }) {
           title="Run started"
           detail={
             <>
-              {event.fileCount} file{event.fileCount === 1 ? "" : "s"}
+              {event.fileCount} source{event.fileCount === 1 ? "" : "s"}
               {event.autoName && " · AI will name"}
             </>
           }

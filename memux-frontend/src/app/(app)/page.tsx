@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
+  ArrowUpRight,
   Files,
   FolderSearch,
   MessageSquare,
@@ -125,54 +126,67 @@ export default function MemuxHome() {
             </p>
           </div>
 
-          <form onSubmit={onSubmit} className="mx-auto mt-9 w-full max-w-3xl rounded-2xl border bg-card/80 p-2 shadow-[0_18px_70px_-32px_rgba(0,0,0,0.65)] backdrop-blur">
-            <div className="flex items-end gap-2">
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    startChat(prompt);
-                  }
-                }}
-                rows={2}
-                placeholder="Ask MEMUX anything about your work…"
-                aria-label="Start a conversation"
-                className="max-h-40 min-h-16 flex-1 resize-none bg-transparent px-3 py-3 text-sm outline-none placeholder:text-muted-foreground/70"
-              />
-              <button
-                type="submit"
-                disabled={!prompt.trim()}
-                className="mb-1 flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background transition-opacity disabled:opacity-30"
-                aria-label="Start chat"
-              >
-                <Send className="size-4" />
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-1.5 border-t px-2 pt-2 pb-1">
+          <div className="mx-auto mt-9 w-full max-w-3xl">
+            <form
+              onSubmit={onSubmit}
+              className="rounded-2xl bg-muted/45 p-2 shadow-[0_18px_70px_-32px_rgba(0,0,0,0.65)] backdrop-blur"
+            >
+              <div className="flex items-end gap-2">
+                <textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      startChat(prompt);
+                    }
+                  }}
+                  rows={2}
+                  placeholder="Ask MEMUX anything about your work…"
+                  aria-label="Start a conversation"
+                  className="max-h-40 min-h-16 flex-1 resize-none bg-transparent px-3 py-3 text-sm outline-none placeholder:text-muted-foreground/70"
+                />
+                <button
+                  type="submit"
+                  disabled={!prompt.trim()}
+                  className="mb-1 flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background transition-opacity disabled:opacity-30"
+                  aria-label="Start chat"
+                >
+                  <Send className="size-4" />
+                </button>
+              </div>
+            </form>
+
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
               {STARTERS.map((starter) => (
-                <button key={starter} type="button" onClick={() => startChat(starter)} className="rounded-full border px-2.5 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground">
+                <button
+                  key={starter}
+                  type="button"
+                  onClick={() => startChat(starter)}
+                  className="rounded-full bg-muted/60 px-3 py-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
                   {starter}
                 </button>
               ))}
             </div>
-          </form>
+          </div>
 
           <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {FEATURES.map(({ href, label, sub, Icon, tone }) => (
               <Link
                 key={href}
                 href={href}
-                className="group rounded-2xl border bg-card/55 p-4 transition-all hover:-translate-y-0.5 hover:border-foreground/25 hover:bg-card"
+                className="group rounded-2xl bg-muted/40 p-4 transition-all hover:-translate-y-0.5 hover:bg-muted/65"
               >
-                <div className={cn("flex size-9 items-center justify-center rounded-xl", tone)}>
-                  <Icon className="size-4" />
+                <div className="flex items-start justify-between gap-3">
+                  <div className={cn("flex size-9 items-center justify-center rounded-xl", tone)}>
+                    <Icon className="size-4" />
+                  </div>
+                  <div className="flex size-8 items-center justify-center rounded-full bg-background/70 text-muted-foreground transition-colors group-hover:bg-background group-hover:text-foreground">
+                    <ArrowUpRight className="size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                  </div>
                 </div>
-                <div className="mt-4 flex items-center gap-2 text-sm font-medium">
-                  {label}
-                  <ArrowRight className="size-3.5 opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-60" />
-                </div>
+                <div className="mt-4 text-sm font-medium">{label}</div>
                 <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{sub}</p>
               </Link>
             ))}

@@ -312,6 +312,12 @@ export async function preflightThumbnails(
 
 /** Re-hydrate a File from OPFS by blobKey. */
 export async function fileFromRef(ref: IndexerFileRef): Promise<File> {
+  if (ref.sourceKind === "text") {
+    const heading = ref.heading?.trim() ?? "";
+    const body = ref.inlineText ?? "";
+    const markdown = heading ? `# ${heading}\n\n${body}` : body;
+    return new File([markdown], ref.name, { type: "text/markdown" });
+  }
   if (!ref.blobKey) throw new Error(`File ref ${ref.id} has no blobKey`);
   const url = await readBlobUrl(ref.blobKey);
   try {

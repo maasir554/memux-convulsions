@@ -80,7 +80,7 @@ export function MemuxIndexPage() {
         <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Index</div>
         <div className="text-sm font-medium">Knowledge builder</div>
         <div className="text-xs text-muted-foreground">
-          Build searchable groups from files + context.
+          Build searchable groups from files, images, and pasted text.
         </div>
         <div className="ml-auto flex items-center gap-2">
           {showLiveButton && (

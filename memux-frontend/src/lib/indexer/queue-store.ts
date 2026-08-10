@@ -19,6 +19,22 @@ import {
 } from "@/lib/indexer/queue-db";
 import { cancelRun } from "@/lib/indexer/runs-registry";
 import type { RunStatus } from "@/lib/db/schema";
+import type { IndexerFileRef } from "@/lib/db/schema";
+
+let pendingDraftWrites: Promise<void> = Promise.resolve();
+
+function textSourceName(heading: string, fallbackIndex: number): string {
+  const base = heading.trim() || `Pasted text ${fallbackIndex}`;
+  const safe = base.replace(/[\\/:*?"<>|]/g, "-").slice(0, 80);
+  return `${safe || `Pasted text ${fallbackIndex}`}.md`;
+}
+
+function persistSources(id: string, files: IndexerFileRef[]): Promise<void> {
+  pendingDraftWrites = pendingDraftWrites
+    .catch(() => undefined)
+    .then(() => updateDraft(id, { files }));
+  return pendingDraftWrites;
+}
 
 type IndexerStore = {
   /** null while the DB is loading. */
@@ -40,6 +56,11 @@ type IndexerStore = {
     prompt?: string;
   }) => Promise<void>;
   attachToActive: (files: File[]) => Promise<void>;
+  addTextToActive: () => Promise<void>;
+  updateTextInActive: (
+    sourceId: string,
+    patch: { heading?: string; inlineText?: string },
+  ) => Promise<void>;
   removeFromActive: (fileRefId: string) => Promise<void>;
   enqueueActive: () => Promise<void>;
   dequeueGroup: (id: string) => Promise<void>;
@@ -114,13 +135,74 @@ export const useIndexerStore = create<IndexerStore>((set, get) => ({
   async attachToActive(files) {
     const id = get().activeId;
     if (!id || files.length === 0) return;
+    await pendingDraftWrites;
     await attachFiles(id, files);
     await get().refreshOne(id);
+  },
+
+  async addTextToActive() {
+    const state = get();
+    const id = state.activeId;
+    const group = state.groups?.find((candidate) => candidate.id === id);
+    if (!id || !group) return;
+    const textIndex =
+      group.files.filter((source) => source.sourceKind === "text").length + 1;
+    const source: IndexerFileRef = {
+      id: `t-${crypto.randomUUID()}`,
+      sourceKind: "text",
+      name: textSourceName("", textIndex),
+      size: 0,
+      mimeType: "text/markdown",
+      heading: "",
+      inlineText: "",
+    };
+    const files = [...group.files, source];
+    set((current) => ({
+      groups: (current.groups ?? []).map((candidate) =>
+        candidate.id === id ? { ...candidate, files } : candidate,
+      ),
+    }));
+    await persistSources(id, files);
+  },
+
+  async updateTextInActive(sourceId, patch) {
+    const state = get();
+    const id = state.activeId;
+    const group = state.groups?.find((candidate) => candidate.id === id);
+    if (!id || !group) return;
+    const sourceIndex = group.files.findIndex((source) => source.id === sourceId);
+    if (sourceIndex < 0) return;
+    const currentSource = group.files[sourceIndex];
+    if (currentSource.sourceKind !== "text") return;
+    const heading = patch.heading ?? currentSource.heading ?? "";
+    const inlineText = patch.inlineText ?? currentSource.inlineText ?? "";
+    const textOrdinal =
+      group.files
+        .slice(0, sourceIndex + 1)
+        .filter((source) => source.sourceKind === "text").length || 1;
+    const nextSource: IndexerFileRef = {
+      ...currentSource,
+      ...patch,
+      heading,
+      inlineText,
+      name: textSourceName(heading, textOrdinal),
+      size: new Blob([inlineText]).size,
+    };
+    const files = group.files.map((source) =>
+      source.id === sourceId ? nextSource : source,
+    );
+    set((current) => ({
+      groups: (current.groups ?? []).map((candidate) =>
+        candidate.id === id ? { ...candidate, files } : candidate,
+      ),
+    }));
+    await persistSources(id, files);
   },
 
   async removeFromActive(fileRefId) {
     const id = get().activeId;
     if (!id) return;
+    await pendingDraftWrites;
     await removeFile(id, fileRefId);
     await get().refreshOne(id);
   },
@@ -128,6 +210,7 @@ export const useIndexerStore = create<IndexerStore>((set, get) => ({
   async enqueueActive() {
     const id = get().activeId;
     if (!id) return;
+    await pendingDraftWrites;
     await enqueue(id);
     await get().refreshOne(id);
   },
@@ -138,6 +221,7 @@ export const useIndexerStore = create<IndexerStore>((set, get) => ({
   },
 
   async deleteGroupById(id) {
+    await pendingDraftWrites;
     await deleteGroup(id);
     set((s) => ({
       groups: (s.groups ?? []).filter((g) => g.id !== id),

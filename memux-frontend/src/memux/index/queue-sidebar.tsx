@@ -231,7 +231,7 @@ function GroupRow({
               : ""}
           </span>
           <span>
-            {group.files.length} file{group.files.length === 1 ? "" : "s"}
+            {group.files.length} source{group.files.length === 1 ? "" : "s"}
           </span>
         </div>
       </div>

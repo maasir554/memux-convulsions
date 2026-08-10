@@ -207,7 +207,7 @@ function FileMeta({
   if (!activeFileName) {
     return (
       <div className="shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
-        {totalFiles > 0 ? `${totalFiles} file${totalFiles === 1 ? "" : "s"} queued` : ""}
+        {totalFiles > 0 ? `${totalFiles} source${totalFiles === 1 ? "" : "s"} queued` : ""}
       </div>
     );
   }
@@ -221,7 +221,7 @@ function FileMeta({
       </div>
       {totalFiles > 1 && (
         <span>
-          file {activeFileIndex + 1}/{totalFiles}
+          source {activeFileIndex + 1}/{totalFiles}
         </span>
       )}
     </div>
